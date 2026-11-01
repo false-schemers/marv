@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# All generated files live in a private copy; the runner never deletes user
+# examples or clobbers another run's /tmp files.
+TEST_WORK=$(mktemp -d /tmp/marv-suite.XXXXXXXX)
+trap 'rm -rf "$TEST_WORK"' EXIT
+ROOT_DIR="$TEST_WORK/repo"
+mkdir -p "$ROOT_DIR/src"
+cp "$SOURCE_DIR"/{m,r,v,a}.{c,h} "$ROOT_DIR/"
+cp -R "$SOURCE_DIR"/{test,examples,lib,srt,target} "$ROOT_DIR/"
+cp -R "$SOURCE_DIR/src/skint" "$ROOT_DIR/src/"
 cd "$ROOT_DIR"
 
 # Tool locations. Everything can be overridden from the environment so the
@@ -25,7 +34,7 @@ SKINT_FLAGS=""
 
 SKINT="$SKINT_BIN $SKINT_FLAGS -q"
 MARV_SKINT="$SKINT_BIN $SKINT_FLAGS -p $ROOT_DIR/src/skint/marv.scm"
-MARV_BIN="/tmp/gh_marv_bin"
+MARV_BIN="$TEST_WORK/gh_marv_bin"
 
 WCPL_HOME=${WCPL_HOME:-/home/user/wcpl}
 WCPL_INC=""
@@ -36,27 +45,23 @@ fi
 # as given, so these bases need their trailing slash.
 MARV_INC="-I$ROOT_DIR/lib/ -I$ROOT_DIR/srt/"
 
-cleanup() {
-  rm -f examples/*.c examples/*.wo examples/*.s \
-        examples/multimod/*.c examples/multimod/*.wo examples/multimod/*.s \
-        /tmp/gh_marv_*
-}
-trap cleanup EXIT
 
 NADAPTERS=$(ls lib/*.c srt/*.c | wc -l)
 
 echo "0. Building the marv compiler from m.c r.c v.c a.c..."
 $CC -O2 -o "$MARV_BIN" "$ROOT_DIR/m.c" "$ROOT_DIR/r.c" "$ROOT_DIR/v.c" "$ROOT_DIR/a.c" -lm
-MARV_BINDIR=${MARV_BINDIR:-/home/user/bin}
-[ -d "$MARV_BINDIR" ] && cp -f "$MARV_BIN" "$MARV_BINDIR/marv" 2>/dev/null || true
+if [ -n "${MARV_BINDIR:-}" ]; then
+  mkdir -p "$MARV_BINDIR"
+  cp -f "$MARV_BIN" "$MARV_BINDIR/marv"
+fi
 echo "  [PASS] Built the compiler ($MARV_BIN) from m.c r.c v.c a.c!"
 
 echo ""
 echo "1. Verifying all $NADAPTERS single-source adapter files in lib/*.c and srt/*.c compile under both cc and wcpl..."
 for f in lib/*.c srt/*.c; do
   b=$(basename "$f" .c)
-  $CC -std=c99 -O2 -Wall -Wextra -Werror -c "$f" -o "/tmp/gh_marv_${b}.o"
-  $WCPL_BIN -q $WCPL_INC $MARV_INC -c -o "/tmp/gh_marv_${b}.wo" "$f"
+  $CC -std=c99 -O2 -Wall -Wextra -Werror -c "$f" -o "$TEST_WORK/gh_marv_${b}.o"
+  $WCPL_BIN -q $WCPL_INC $MARV_INC -c -o "$TEST_WORK/gh_marv_${b}.wo" "$f"
 done
 echo "  [PASS] All $NADAPTERS lib/*.c and srt/*.c adapters compiled cleanly under both cc and wcpl -c!"
 
@@ -74,38 +79,38 @@ for ex in dirent_demo libc_demo queens; do
   done
   # a .wo object is fully determined by the module, so it is compared exactly;
   # what the cc and rv64g targets emit is checked by running it, in 3 and 6
-  $MARV_SKINT -T target -t wcpl -c -o "/tmp/gh_marv_alt_${ex}.wo" "examples/$ex.mvs"
-  diff -u "/tmp/gh_marv_alt_${ex}.wo" "examples/$ex.wo"
+  $MARV_SKINT -T target -t wcpl -c -o "$TEST_WORK/gh_marv_alt_${ex}.wo" "examples/$ex.mvs"
+  diff -u "$TEST_WORK/gh_marv_alt_${ex}.wo" "examples/$ex.wo"
 done
 rm -f examples/*.c examples/*.wo examples/*.s
 echo "  [PASS] marv generated .c, .wo and .s for every example, and each .wo exactly!"
 
-"$MARV_BIN" -v -T target -t cc -o /tmp/gh_marv_dirent examples/dirent_demo.mvs 2> /tmp/gh_marv_verbose.err
-grep -q "^marv -t cc -c -o .* examples/dirent_demo.mvs$" /tmp/gh_marv_verbose.err
-grep -q "^cc .* -o /tmp/gh_marv_dirent " /tmp/gh_marv_verbose.err
+"$MARV_BIN" -v -T target -t cc -o $TEST_WORK/gh_marv_dirent examples/dirent_demo.mvs 2> $TEST_WORK/gh_marv_verbose.err
+grep -q "^marv -t cc -c -o .* examples/dirent_demo.mvs$" $TEST_WORK/gh_marv_verbose.err
+grep -q "^cc .* -o $TEST_WORK/gh_marv_dirent " $TEST_WORK/gh_marv_verbose.err
 test ! -f examples/dirent_demo.c
-"$MARV_BIN" -T target -t cc -o /tmp/gh_marv_libc   examples/libc_demo.mvs
+"$MARV_BIN" -T target -t cc -o $TEST_WORK/gh_marv_libc   examples/libc_demo.mvs
 test ! -f examples/libc_demo.c
-"$MARV_BIN" -T target -t cc -o /tmp/gh_marv_queens examples/queens.mvs
+"$MARV_BIN" -T target -t cc -o $TEST_WORK/gh_marv_queens examples/queens.mvs
 test ! -f examples/queens.c
 
-/tmp/gh_marv_dirent > /tmp/gh_marv_dirent_cc.out
-/tmp/gh_marv_libc
-/tmp/gh_marv_queens > /tmp/gh_marv_queens_cc.out
+$TEST_WORK/gh_marv_dirent > $TEST_WORK/gh_marv_dirent_cc.out
+$TEST_WORK/gh_marv_libc
+$TEST_WORK/gh_marv_queens > $TEST_WORK/gh_marv_queens_cc.out
 echo "  [PASS] Standalone marv compile-and-link mode (-t cc) built and ran all examples using cleaned-up temporary objects!"
 
 echo ""
 echo "4. Testing 3-module separate compilation & mixed (.c + .mvs) linking with standalone marv..."
 "$MARV_BIN" -T target -t cc -c examples/multimod/vec3.mvs
-"$MARV_BIN" -T target -t cc -o /tmp/gh_marv_multimod \
+"$MARV_BIN" -T target -t cc -o $TEST_WORK/gh_marv_multimod \
   examples/multimod/vec3.c examples/multimod/stats.mvs examples/multimod/app.mvs
-/tmp/gh_marv_multimod > /tmp/gh_marv_mm_cc.out
-cat /tmp/gh_marv_mm_cc.out
+$TEST_WORK/gh_marv_multimod > $TEST_WORK/gh_marv_mm_cc.out
+cat $TEST_WORK/gh_marv_mm_cc.out
 echo "  [PASS] 3-module mixed object + .mvs build succeeded!"
 
 echo ""
 echo "5. Testing SRFI-270 hexadecimal floating-point literals with standalone marv..."
-cat > /tmp/gh_marv_hexflt.mvs << 'EOF'
+cat > $TEST_WORK/gh_marv_hexflt.mvs << 'EOF'
 (module $hexflt
   (func $main (export "main")
     (result i32)
@@ -119,38 +124,38 @@ cat > /tmp/gh_marv_hexflt.mvs << 'EOF'
       (then (return (i32.const 0)))
       (else (return (i32.const 1))))))
 EOF
-"$MARV_BIN" -T target -t cc   -c -o /tmp/gh_marv_hexflt.c  /tmp/gh_marv_hexflt.mvs
-"$MARV_BIN" -T target -t wcpl -c -o /tmp/gh_marv_hexflt.wo /tmp/gh_marv_hexflt.mvs
-"$MARV_BIN" -T target -t rv64g -c -o /tmp/gh_marv_hexflt.s /tmp/gh_marv_hexflt.mvs
-"$MARV_BIN" -T target -t cc -o /tmp/gh_marv_hexflt_bin /tmp/gh_marv_hexflt.mvs
-/tmp/gh_marv_hexflt_bin
-$WCPL_BIN -q $WCPL_INC -o /tmp/gh_marv_hexflt.wasm /tmp/gh_marv_hexflt.wo
-test -s /tmp/gh_marv_hexflt.wasm
+"$MARV_BIN" -T target -t cc   -c -o $TEST_WORK/gh_marv_hexflt.c  $TEST_WORK/gh_marv_hexflt.mvs
+"$MARV_BIN" -T target -t wcpl -c -o $TEST_WORK/gh_marv_hexflt.wo $TEST_WORK/gh_marv_hexflt.mvs
+"$MARV_BIN" -T target -t rv64g -c -o $TEST_WORK/gh_marv_hexflt.s $TEST_WORK/gh_marv_hexflt.mvs
+"$MARV_BIN" -T target -t cc -o $TEST_WORK/gh_marv_hexflt_bin $TEST_WORK/gh_marv_hexflt.mvs
+$TEST_WORK/gh_marv_hexflt_bin
+$WCPL_BIN -q $WCPL_INC -o $TEST_WORK/gh_marv_hexflt.wasm $TEST_WORK/gh_marv_hexflt.wo
+test -s $TEST_WORK/gh_marv_hexflt.wasm
 echo "  [PASS] SRFI-270 hex float parsing and emission verified across cc, wcpl, and rv64g!"
 
 echo ""
 echo "6. Checking instruction edge cases (test/edge.mvs) against test/edge.expected..."
 # shift masking, signed/unsigned division, clz/ctz of zero, sign extension,
 # truncation, nearest-ties-to-even, narrow loads, br_table defaults.  [cco]
-"$MARV_BIN" -T target -t cc -o /tmp/gh_marv_edge test/edge.mvs
-/tmp/gh_marv_edge > /tmp/gh_marv_edge.out
-diff -u test/edge.expected /tmp/gh_marv_edge.out
+"$MARV_BIN" -T target -t cc -o $TEST_WORK/gh_marv_edge test/edge.mvs
+$TEST_WORK/gh_marv_edge > $TEST_WORK/gh_marv_edge.out
+diff -u test/edge.expected $TEST_WORK/gh_marv_edge.out
 # the same values must come out of the rv64g assembly
-"$MARV_BIN" -T target -t rv64g -c -o /tmp/gh_marv_edge.s test/edge.mvs
-$SKINT test/edge-rv64.scm > /tmp/gh_marv_edge_rv.out
-diff -u test/edge.expected /tmp/gh_marv_edge_rv.out
+"$MARV_BIN" -T target -t rv64g -c -o $TEST_WORK/gh_marv_edge.s test/edge.mvs
+$SKINT test/edge-rv64.scm "$TEST_WORK/gh_marv_edge.s" > $TEST_WORK/gh_marv_edge_rv.out
+diff -u test/edge.expected $TEST_WORK/gh_marv_edge_rv.out
 echo "  [PASS] All 24 edge cases agree between cc, rv64g and WebAssembly semantics!"
 
 echo ""
 echo "7. Testing configure --prefix and -D PREFIX installation lookup..."
-mkdir -p /tmp/gh_marv_pfx/share/marv/target /tmp/gh_marv_pfx/share/marv/lib
-cp target/*.mvt /tmp/gh_marv_pfx/share/marv/target/
-cp lib/*.mvh lib/*.c /tmp/gh_marv_pfx/share/marv/lib/
-$CC -O2 -D PREFIX=/tmp/gh_marv_pfx/share/marv/ -o /tmp/gh_marv_pfx_bin "$ROOT_DIR/m.c" "$ROOT_DIR/r.c" "$ROOT_DIR/v.c" "$ROOT_DIR/a.c" -lm
-(cd /tmp && /tmp/gh_marv_pfx_bin -t cc -o /tmp/gh_marv_pfx_queens "$ROOT_DIR/examples/queens.mvs")
-/tmp/gh_marv_pfx_queens > /tmp/gh_marv_pfx_queens.out
-diff -u /tmp/gh_marv_queens_cc.out /tmp/gh_marv_pfx_queens.out
-rm -rf /tmp/gh_marv_pfx
+mkdir -p $TEST_WORK/gh_marv_pfx/share/marv/target $TEST_WORK/gh_marv_pfx/share/marv/lib
+cp target/*.mvt $TEST_WORK/gh_marv_pfx/share/marv/target/
+cp lib/*.mvh lib/*.c $TEST_WORK/gh_marv_pfx/share/marv/lib/
+$CC -O2 -D PREFIX=$TEST_WORK/gh_marv_pfx/share/marv/ -o $TEST_WORK/gh_marv_pfx_bin "$ROOT_DIR/m.c" "$ROOT_DIR/r.c" "$ROOT_DIR/v.c" "$ROOT_DIR/a.c" -lm
+(cd /tmp && $TEST_WORK/gh_marv_pfx_bin -t cc -o $TEST_WORK/gh_marv_pfx_queens "$ROOT_DIR/examples/queens.mvs")
+$TEST_WORK/gh_marv_pfx_queens > $TEST_WORK/gh_marv_pfx_queens.out
+diff -u $TEST_WORK/gh_marv_queens_cc.out $TEST_WORK/gh_marv_pfx_queens.out
+rm -rf $TEST_WORK/gh_marv_pfx
 echo "  [PASS] -D PREFIX target and library lookup verified from out-of-tree directory!"
 
 echo ""
@@ -165,3 +170,124 @@ for u in m r v a; do
   head -1 "$ROOT_DIR/$u.h" | grep -qE "^/\* $u\.h \(marv "
 done
 echo "  [PASS] m r v a are each a .c with its own .h, and all four are intact!"
+for u in m r v a; do
+  $WCPL_BIN -q $WCPL_INC -I"$ROOT_DIR/" -c \
+    -o "$TEST_WORK/wcpl_${u}.wo" "$ROOT_DIR/$u.c"
+done
+$WCPL_BIN -q $WCPL_INC -o "$TEST_WORK/wcpl_marv.wasm" \
+  "$TEST_WORK/wcpl_m.wo" "$TEST_WORK/wcpl_r.wo" \
+  "$TEST_WORK/wcpl_v.wo" "$TEST_WORK/wcpl_a.wo"
+test -s "$TEST_WORK/wcpl_marv.wasm"
+echo "  [PASS] All four compiler units compile and link with WCPL!"
+
+
+echo ""
+echo "9. Testing native stdio formatting and scanning regressions..."
+cat > "$TEST_WORK/stdio-regression.mvs" <<'EOF'
+(include system $stdio)
+(module $stdio_regression
+  (data $wide const align 1 "%600d\x00;")
+  (data $small const align 1 "%hhd\x00;")
+  (func $main (export "main") (result i32)
+    (frame 16)
+    (if (i32.ne (call $snprintf (frame.addr 0) (i32.const 16)
+                                (ref.data $wide) (i32.const 42))
+                (i32.const 600))
+      (then (return (i32.const 1))))
+    (if (i32.ne (i32.load8_u (frame.addr 15)) (i32.const 0))
+      (then (return (i32.const 2))))
+    (drop (call $snprintf (frame.addr 0) (i32.const 16)
+                          (ref.data $small) (i32.const 257)))
+    (if (i32.ne (i32.load8_u (frame.addr 0)) (i32.const 49))
+      (then (return (i32.const 3))))
+    (return (i32.const 0))))
+EOF
+"$MARV_BIN" -T target -t cc -o "$TEST_WORK/stdio-regression" "$TEST_WORK/stdio-regression.mvs"
+"$TEST_WORK/stdio-regression"
+$CC -std=c99 -O2 -Wall -Wextra -Werror -o "$TEST_WORK/native-stdio" \
+  test/native-stdio.c lib/stdio.c lib/errno.c -lm
+"$TEST_WORK/native-stdio"
+
+echo ""
+echo "10. Testing paths, precompiled dependencies, and failed-link cleanup..."
+mkdir -p "$TEST_WORK/path with spaces/lib" "$TEST_WORK/path with spaces/tmp"
+cp lib/*.mvh lib/*.c "$TEST_WORK/path with spaces/lib/"
+"$MARV_BIN" -T target -t cc -c -o "$TEST_WORK/path with spaces/object file.c" examples/queens.mvs
+(cd "$TEST_WORK" && "$MARV_BIN" -T "$ROOT_DIR/target" \
+  -L "$TEST_WORK/path with spaces/lib" -t cc \
+  -o "$TEST_WORK/path with spaces/program file" "$TEST_WORK/path with spaces/object file.c")
+"$TEST_WORK/path with spaces/program file" > "$TEST_WORK/path-result"
+diff -u "$TEST_WORK/gh_marv_queens_cc.out" "$TEST_WORK/path-result"
+TMPDIR="$TEST_WORK/path with spaces/tmp" "$MARV_BIN" -T target -t cc \
+  -o "$TEST_WORK/path with spaces/compiled source" examples/queens.mvs
+"$TEST_WORK/path with spaces/compiled source" > "$TEST_WORK/path-result"
+diff -u "$TEST_WORK/gh_marv_queens_cc.out" "$TEST_WORK/path-result"
+if TMPDIR="$TEST_WORK/path with spaces/tmp" "$MARV_BIN" -T target -t cc \
+  -o "$TEST_WORK/nonexistent-dir/out" examples/queens.mvs > /dev/null 2>&1; then
+  echo "[FAIL] link to nonexistent directory unexpectedly succeeded" >&2; exit 1
+fi
+if [ -n "$(ls -A "$TEST_WORK/path with spaces/tmp")" ]; then
+  echo "[FAIL] temporary objects survived a failed link" >&2; exit 1
+fi
+if TMPDIR="$TEST_WORK/path with spaces/tmp" "$MARV_BIN" -T target -t cc -o "$TEST_WORK/out;touch $TEST_WORK/injected" \
+  examples/queens.mvs > /dev/null 2>&1; then
+  echo "[FAIL] shell-sensitive path was accepted" >&2; exit 1
+fi
+test ! -e "$TEST_WORK/injected"
+test -z "$(ls -A "$TEST_WORK/path with spaces/tmp")"
+TMPDIR="$TEST_WORK/path with spaces/tmp" "$MARV_BIN" -n -T target -t cc \
+  -o "$TEST_WORK/path with spaces/dry run" examples/queens.mvs > "$TEST_WORK/dry-run.sh"
+bash "$TEST_WORK/dry-run.sh"
+"$TEST_WORK/path with spaces/dry run" > "$TEST_WORK/path-result"
+diff -u "$TEST_WORK/gh_marv_queens_cc.out" "$TEST_WORK/path-result"
+test -z "$(ls -A "$TEST_WORK/path with spaces/tmp")"
+printf '(module $empty)\n' > "$TEST_WORK/empty.mvs"
+"$MARV_BIN" -T target -t cc -c -o "$TEST_WORK/empty.c" "$TEST_WORK/empty.mvs"
+test -s "$TEST_WORK/empty.c"
+echo "  [PASS] spaces, dependencies, invalid paths and failed-link cleanup!"
+
+echo ""
+echo "11. Testing grouped local declarations..."
+# Compare with the equivalent individual declarations on every backend.
+sed \
+  -e 's/(local \$p \$q \$r ptr)/(local $p ptr) (local $q ptr) (local $r ptr)/' \
+  -e 's/(local \$i \$j \$k i32)/(local $i i32) (local $j i32) (local $k i32)/' \
+  -e 's/(local \$x \$y i64)/(local $x i64) (local $y i64)/' \
+  -e 's/(local \$f \$g f32)/(local $f f32) (local $g f32)/' \
+  -e 's/(local \$d \$e f64)/(local $d f64) (local $e f64)/' \
+  test/grouped-locals.mvs > "$TEST_WORK/grouped-expanded.mvs"
+for t in cc wcpl rv64g; do
+  case $t in cc) ext=c;; wcpl) ext=wo;; rv64g) ext=s;; esac
+  "$MARV_BIN" -T target -t "$t" -c -o "$TEST_WORK/grouped.$ext" test/grouped-locals.mvs
+  "$MARV_BIN" -T target -t "$t" -c -o "$TEST_WORK/expanded.$ext" "$TEST_WORK/grouped-expanded.mvs"
+  diff -u "$TEST_WORK/expanded.$ext" "$TEST_WORK/grouped.$ext"
+done
+"$MARV_BIN" -T target -t cc -o "$TEST_WORK/grouped" test/grouped-locals.mvs
+"$TEST_WORK/grouped"
+$SKINT test/grouped-locals-rv64.scm "$TEST_WORK/grouped.s"
+$WCPL_BIN -q $WCPL_INC -o "$TEST_WORK/grouped.wasm" "$TEST_WORK/grouped.wo"
+test -s "$TEST_WORK/grouped.wasm"
+$MARV_SKINT -T target -t wcpl -c -o "$TEST_WORK/grouped-skint.wo" test/grouped-locals.mvs
+diff -u "$TEST_WORK/grouped-skint.wo" "$TEST_WORK/grouped.wo"
+$SKINT_BIN $SKINT_FLAGS -p "$ROOT_DIR/src/skint/marv-simple.scm" -T target -t wcpl -c \
+  -o "$TEST_WORK/grouped-simple.wo" test/grouped-locals.mvs
+diff -u "$TEST_WORK/grouped-simple.wo" "$TEST_WORK/grouped.wo"
+cat > "$TEST_WORK/grouped-trampoline.mvs" <<'END'
+(module $grouped_trampoline
+  (trampoline_func $entry (result ptr)
+    (local $x $y ptr)
+    (return (local.get $y)))
+  (func $main (export "main") (result i32)
+    (if (ptr.eqz (call $entry))
+      (then (return (i32.const 0)))
+      (else (return (i32.const 1))))))
+END
+"$MARV_BIN" -T target -t cc -o "$TEST_WORK/grouped-trampoline" "$TEST_WORK/grouped-trampoline.mvs"
+"$TEST_WORK/grouped-trampoline"
+for local_decl in '(local)' '(local $x)' '(local $x unknown)' '(local $x 7 ptr)' '(local $x i32 $y)'; do
+  printf '(module $invalid (func $main (result i32) %s (return (i32.const 0))))\n' "$local_decl" > "$TEST_WORK/invalid.mvs"
+  if "$MARV_BIN" -T target -t cc -c -o "$TEST_WORK/invalid.c" "$TEST_WORK/invalid.mvs" > /dev/null 2>&1; then
+    echo "[FAIL] accepted invalid declaration: $local_decl" >&2; exit 1
+  fi
+done
+echo "  [PASS] grouped locals, macro typing, equivalence and diagnostics!"

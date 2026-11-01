@@ -49,8 +49,7 @@ long marv_pid(void) { return (long)getpid(); }
 void report_peak(void) {}
 long marv_pid(void) { return (long)_getpid(); }
 #endif
-#endif
-#ifdef __WCPL__
+#else
 void report_peak(void) {}
 long marv_pid(void) { return 0; }
 #endif
@@ -61,6 +60,62 @@ long marv_pid(void) { return 0; }
  * to stdout, so the printed script stays usable on its own. [cco] */
 int g_dryrun;
 
+/* A command path uses a deliberately small character set shared by the
+ * Unix shell and Windows cmd.  Target command templates remain shell text. */
+static bool shell_path(cbuf_t *dst, const char *path, bool input, bool for_del);
+
+#ifndef __WCPL__
+#ifdef _WIN32
+static bool host_windows(void) { return true; }
+#else
+static bool host_windows(void) { return false; }
+#endif
+#else
+static bool host_windows(void) { return false; }
+#endif
+
+static bool shell_path(cbuf_t *dst, const char *path, bool input, bool for_del)
+{
+  const unsigned char *p;
+  bool quote;
+  if (path[0] == 0) { fprintf(stderr, "marv: empty command path\n"); return false; }
+  quote = false;
+  for (p = (const unsigned char *)path; *p != 0; ++p) {
+    unsigned char c;
+    c = *p;
+    if (c == '\\' && host_windows()) c = '/';
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' ||
+          c == '/' || c == ':' || c == ' ')) {
+      fprintf(stderr, "marv: unsupported character in command path: %s\n", path);
+      return false;
+    }
+    if (c == ' ') quote = true;
+  }
+  if (quote) cbputc('"', dst);
+  if (input && path[0] == '-') cbputs("./", dst);
+  for (p = (const unsigned char *)path; *p != 0; ++p) {
+    int c;
+    c = *p;
+    if (c == '\\' && host_windows()) c = '/';
+    if (c == '/' && host_windows() && for_del) c = '\\';
+    cbputc(c, dst);
+  }
+  if (quote) cbputc('"', dst);
+  return true;
+}
+
+static void print_delete(const char *path)
+{
+  cbuf_t cmd;
+  cbinit(&cmd);
+  cbputs(host_windows() ? "del /q " : "rm -f ", &cmd);
+  if (!shell_path(&cmd, path, true, host_windows())) { cbfini(&cmd); return; }
+  cbputc(0, &cmd);
+  fprintf(stdout, "%s\n", (const char *)cbdata(&cmd));
+  cbfini(&cmd);
+}
+
 #ifndef __WCPL__
 int runcmd(const char *cmd)
 {
@@ -69,11 +124,10 @@ int runcmd(const char *cmd)
 }
 int delfile(const char *path)
 {
-  if (g_dryrun != 0) { fprintf(stdout, "rm -f %s\n", path); return 0; }
+  if (g_dryrun != 0) { print_delete(path); return 0; }
   return remove(path);
 }
-#endif
-#ifdef __WCPL__
+#else
 int runcmd(const char *cmd)
 {
   fprintf(stdout, "%s\n", cmd);
@@ -81,7 +135,7 @@ int runcmd(const char *cmd)
 }
 int delfile(const char *path)
 {
-  fprintf(stdout, "rm -f %s\n", path);
+  print_delete(path);
   return 0;
 }
 #endif
@@ -554,9 +608,9 @@ static sym_t temp_obj(const char *ext)
   sym_t r;
   const char *tdir;
   tdir = getenv("TMPDIR");
-  if (tdir == NULL) tdir = getenv("TMP");
-  if (tdir == NULL) tdir = getenv("TEMP");
-  if (tdir == NULL) tdir = "/tmp";
+  if (tdir == NULL || tdir[0] == 0) tdir = getenv("TMP");
+  if (tdir == NULL || tdir[0] == 0) tdir = getenv("TEMP");
+  if (tdir == NULL || tdir[0] == 0) tdir = host_windows() ? "." : "/tmp";
   cbinit(&cb);
   for (;;) {
     cbclear(&cb);
@@ -611,6 +665,7 @@ static void adapters_of_object(const char *path, buf_t *pcs)
   FILE *fp;
   cbuf_t ln;
   cbuf_t cb;
+  cbuf_t pathbuf;
   const char *s;
   const char *at;
   int c;
@@ -618,6 +673,7 @@ static void adapters_of_object(const char *path, buf_t *pcs)
   if (fp == NULL) return;
   cbinit(&ln);
   cbinit(&cb);
+  cbinit(&pathbuf);
   while ((c = fgetc(fp)) != EOF && c != '\n') cbputc(c, &ln);
   fclose(fp);
   cbputc(0, &ln);
@@ -635,10 +691,10 @@ static void adapters_of_object(const char *path, buf_t *pcs)
         cbclear(&cb);
         cbput(at, n, &cb);
         cbputc(0, &cb);
-        if (find_in_dirs(&g_ldirs, NULL, (const char *)cbdata(&cb), ".mvh", &ln)) {
+        if (find_in_dirs(&g_ldirs, NULL, (const char *)cbdata(&cb), ".mvh", &pathbuf)) {
           cbuf_t ad;
           cbinit(&ad);
-          if (adapter_of((const char *)cbdata(&ln), &ad)) {
+          if (adapter_of((const char *)cbdata(&pathbuf), &ad)) {
             sym_t p;
             size_t k;
             bool seen;
@@ -654,6 +710,7 @@ static void adapters_of_object(const char *path, buf_t *pcs)
       at += n;
     }
   }
+  cbfini(&pathbuf);
   cbfini(&cb);
   cbfini(&ln);
 }
@@ -687,6 +744,10 @@ static bool split_opens(const char *l, const char *next)
   return next != NULL && next[0] == '{';
 }
 
+static const char *g_split_types[7] = { "marv_i32 ", "marv_i64 ", "marv_f32 ",
+                                         "marv_f64 ", "marv_ptr ", "marv_u32 ",
+                                         "marv_u64 " };
+
 /* does this line start a definition of storage rather than of code */
 static bool split_is_data(const char *l, cbuf_t *pex)
 {
@@ -705,20 +766,17 @@ static bool split_is_data(const char *l, cbuf_t *pex)
   }
   if (strstr(p, "unsigned char ") != p) {
     /* a global: <marv type> <name> [= ...]; */
-    static const char *tys[7] = { "marv_i32 ", "marv_i64 ", "marv_f32 ",
-                                  "marv_f64 ", "marv_ptr ", "marv_u32 ",
-                                  "marv_u64 " };
     size_t t;
     for (t = 0; t < 7; ++t) {
-      if (strstr(p, tys[t]) == p) {
-        nm = p + strlen(tys[t]);
+      if (strstr(p, g_split_types[t]) == p) {
+        nm = p + strlen(g_split_types[t]);
         n = 0;
         while (nm[n] != 0 && nm[n] != ' ' && nm[n] != ';'
                && nm[n] != '=' && nm[n] != '(') n += 1;
         /* a name followed by a parameter list is a function, not storage */
         if (n == 0 || nm[n] == '(') return false;
         cbputs("extern ", pex);
-        cbput(tys[t], strlen(tys[t]), pex);
+        cbput(g_split_types[t], strlen(g_split_types[t]), pex);
         cbput(nm, n, pex);
         cbputs(";", pex);
         return true;
@@ -933,23 +991,30 @@ static size_t split_file(const char *path, const char *objext, buf_t *pnames,
   return npieces;
 }
 
-static void run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
+static bool bad_command_path(cbuf_t *cmd, cbuf_t *src)
+{
+  cbfini(cmd);
+  cbfini(src);
+  return false;
+}
+
+static bool run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
 {
   cbuf_t src;
   cbuf_t cmd;
   size_t i;
   int rc;
   cbinit(&src);
+  cbinit(&cmd);
   for (i = 0; i < buflen(pobjs); ++i) {
     if (cblen(&src) > 0) cbputc(' ', &src);
-    cbputs(symname(*(sym_t *)bufref(pobjs, i)), &src);
+    if (!shell_path(&src, symname(*(sym_t *)bufref(pobjs, i)), true, false)) return bad_command_path(&cmd, &src);
   }
   for (i = 0; i < buflen(pcs); ++i) {
     if (cblen(&src) > 0) cbputc(' ', &src);
-    cbputs(symname(*(sym_t *)bufref(pcs, i)), &src);
+    if (!shell_path(&src, symname(*(sym_t *)bufref(pcs, i)), true, false)) return bad_command_path(&cmd, &src);
   }
   cbputc(0, &src);
-  cbinit(&cmd);
   if (pt->linkcmd != 0) {
     const char *s;
     s = symname(pt->linkcmd);
@@ -957,12 +1022,15 @@ static void run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
       if (s[0] == '~' && strncmp(s, "~src", 4) == 0) {
         cbputs((const char *)cbdata(&src), &cmd); s += 4;
       } else if (s[0] == '~' && strncmp(s, "~exe", 4) == 0) {
-        cbputs(out, &cmd); s += 4;
+        if (!shell_path(&cmd, out, false, false)) return bad_command_path(&cmd, &src);
+        s += 4;
       } else { cbputc(*s, &cmd); s += 1; }
     }
   } else {
-    cbsetf(&cmd, "%s %s -o %s %s", symname(pt->cc), symname(pt->flags), out,
-           (const char *)cbdata(&src));
+    cbsetf(&cmd, "%s %s -o ", symname(pt->cc), symname(pt->flags));
+    if (!shell_path(&cmd, out, false, false)) return bad_command_path(&cmd, &src);
+    cbputc(' ', &cmd);
+    cbputs((const char *)cbdata(&src), &cmd);
   }
   cbputc(0, &cmd);
   if (g_verbose != 0) fprintf(stderr, "%s\n", (const char *)cbdata(&cmd));
@@ -970,10 +1038,11 @@ static void run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
   if (rc != 0) {
     fprintf(stderr, "marv: the target linker failed (%d)\n", rc);
     cbfini(&cmd); cbfini(&src);
-    exit(1);
+    return false;
   }
   cbfini(&cmd);
   cbfini(&src);
+  return true;
 }
 
 int main(int argc, char **argv)
@@ -981,7 +1050,7 @@ int main(int argc, char **argv)
   int i, dflag;
   const char *targdes;
   const char *outfile;
-  bool conly;
+  bool conly, linked;
   tgt_t tgt;
   cbuf_t mvtpath;
   buf_t objs, temps, cs;
@@ -1183,10 +1252,10 @@ int main(int argc, char **argv)
       adapters_of_object(argv[i], &cs);
     }
   }
-  run_linker(&tgt, outfile, &objs, &cs);
+  linked = run_linker(&tgt, outfile, &objs, &cs);
   for (i = 0; (size_t)i < buflen(&temps); ++i)
     delfile(symname(*(sym_t *)bufref(&temps, (size_t)i)));
   buffini(&objs); buffini(&temps); buffini(&cs);
   dirs_fini();
-  return 0;
+  return linked ? 0 : 1;
 }

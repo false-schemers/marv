@@ -243,9 +243,9 @@ f64  norm(ptr v);
 Buffered stream I/O and formatted printing/scanning.
 
 ### Constants & Standard Streams
-- `$EOF` (`-1`), `$BUFSIZ` (`1024`), `$FOPEN_MAX` (`20`), `$FILENAME_MAX` (`1024`)
+- `$EOF` (`-1`), `$BUFSIZ` (`1024`), `$FOPEN_MAX` (`20`), `$FILENAME_MAX` (`260`)
 - `$SEEK_SET` (`0`), `$SEEK_CUR` (`1`), `$SEEK_END` (`2`)
-- `$_IONBF` (`0`), `$_IOLBF` (`1`), `$_IOFBF` (`2`)
+- `$_IONBF` (`4`), `$_IOLBF` (`64`), `$_IOFBF` (`0`)
 - Standard stream expressions (`(const $stdin)`, `(const $stdout)`, `(const $stderr)`), backed by `$stdio:_iob` (`+0`, `+32`, `+64`).
 
 ### Functions
@@ -262,13 +262,9 @@ i32  fread(ptr ptr_buf, i32 size, i32 nmemb, ptr stream);
 i32  fwrite(ptr ptr_buf, i32 size, i32 nmemb, ptr stream);
 
 i32  fgetc(ptr stream);
-i32  getc(ptr stream);
-i32  getchar(void);
 i32  ungetc(i32 c, ptr stream);
 
 i32  fputc(i32 c, ptr stream);
-i32  putc(i32 c, ptr stream);
-i32  putchar(i32 c);
 
 ptr  fgets(ptr s, i32 n, ptr stream);
 i32  fputs(ptr s, ptr stream);
@@ -280,15 +276,11 @@ void rewind(ptr stream);
 i32  fgetpos(ptr stream, ptr pos);
 i32  fsetpos(ptr stream, ptr pos);
 
-void clearerr(ptr stream);
-i32  feof(ptr stream);
-i32  ferror(ptr stream);
-i32  fileno(ptr stream);
 void perror(ptr s);
 
 i32  remove(ptr pathname);
 i32  rename(ptr oldpath, ptr newpath);
-ptr  tmpfile(void);
+i32  renameat(i32 oldfd, ptr oldpath, i32 newfd, ptr newpath);
 
 // Variadic formatted output & input:
 i32  printf(ptr format, ...);
@@ -304,6 +296,11 @@ i32  vsnprintf(ptr s, i32 n, ptr format, ptr ap);
 i32  scanf(ptr format, ...);
 i32  fscanf(ptr stream, ptr format, ...);
 i32  sscanf(ptr s, ptr format, ...);
+i32  snscanf(ptr s, i32 count, ptr format, ...);
+i32  vscanf(ptr format, ptr ap);
+i32  vfscanf(ptr stream, ptr format, ptr ap);
+i32  vsscanf(ptr s, ptr format, ptr ap);
+i32  vsnscanf(ptr s, i32 count, ptr format, ptr ap);
 ```
 
 ---

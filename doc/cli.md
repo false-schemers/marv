@@ -22,8 +22,11 @@ marv -t TARGDES [-c] [OPTION]... FILE...
 | `-L` | `--system-dir=DIR` | `DIR` | Add `DIR` to the system `.mvh` header and `.c` adapter lookup path (default: `("lib/" "<PREFIX>/lib")` or `("lib/" "libs/")`). |
 | `-I` | `--include-dir=DIR` | `DIR` | Add `DIR` to the project/local `.mvh` header lookup path (default: `("./")`). |
 | `-v` | `--verbose` | *(none)* | Print each compilation step line and the linker command line to `stderr` before executing. |
+| `-n` | `--dry-run` | *(none)* | Print the target command and cleanup commands instead of executing them. MARV still generates the temporary target files. |
 | `-h` | `--help` | *(none)* | Display command-line usage and options. |
 | | `--split-funcs=N` | `N` | In link mode on a `cc` target, cut the generated C into pieces of at most `N` function definitions, each compiled as its own translation unit (default `300`; `0` does not cut). One huge translation unit is what makes a host C compiler's memory grow on a large module. Ignored in `-c` mode, which always writes one file. |
+
+Diagnostic modes `--count`, `--write`, `--stream`, `--3ac`, and `--3ac-write` inspect source input instead of compiling it; see `marv --help`.
 
 Options follow standard POSIX syntax: short flags may be clustered (e.g. `-vc`), and option arguments may be passed either separately (`-t cc`, `-o app`) or attached (`-tcc`, `--target=cc`, `--output=app`).
 
@@ -64,7 +67,21 @@ In compile-and-link mode, `marv`:
 1. Compiles each `.mvs` file on the command line to a temporary target object file in the system temporary directory (`TMPDIR`, `TMP`, or `TEMP`, falling back to `/tmp` on Unix-like systems or `.` on Windows).
 2. Inspects the `(include system $...)` dependencies of the input modules, locates the corresponding system `.mvh` headers in the `-L` lookup directories (default `("lib/" "<PREFIX>/lib")` or `("lib/" "libs/")`), and pairs each with its `.c` adapter file in the same directory (`lib/<module>.c`).
 3. Invokes the target compiler/linker defined in the `.mvt` file with `-o FILE`, the module object files, and the required system `.c` adapter files.
-4. Deletes the temporary object files created during the run when finished.
+4. Deletes the temporary object files created during the run when the target command succeeds or fails. With `-n`, cleanup is printed instead of performed.
+
+### Paths passed to the target command
+
+MARV runs the `.mvt` link command through the host command interpreter. Each
+object, adapter and output path is passed separately; paths containing spaces
+are double-quoted. To keep the same simple convention on Unix shells and
+Windows `cmd`, these paths are limited to ASCII letters and digits, spaces,
+`_`, `-`, `.`, `/`, and `:`. Other characters cause a diagnostic rather than
+being interpreted by the shell. On Windows, backslashes in these paths are
+converted to forward slashes for the target command; Windows dry-run cleanup
+uses `del`. The `.mvt` command template itself is trusted shell text and must
+not surround `~src` or `~exe` with its own quotes. Paths used only by MARV,
+such as a source compiled to a temporary object, are not subject to this
+command-path restriction.
 
 ```sh
 # Build a native executable from three .mvs modules

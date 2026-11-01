@@ -50,7 +50,7 @@ Inside function bodies, instructions may be written in **folded** form, **flat**
 
 MARV separates **virtual registers** (`(param $x T)` and `(local $y T)`) from **addressable stack memory**:
 
-- Parameters and locals cannot have their address taken and are allocated to hardware registers on `rv64g` (or WebAssembly locals on `wcpl` and C locals on `cc`).
+- Parameters and locals cannot have their address taken and are allocated to hardware registers on `rv64g` (or WebAssembly locals on `wcpl` and C locals on `cc`). Several locals of the same type can share a declaration, for example `(local $t1 $t2 $t3 ptr)`.
 - Functions that need stack-allocated structs, buffers, out-parameters, or variadic argument areas declare a fixed-size 16-byte-aligned addressable frame with `(frame N)` and compute pointers into it with `(frame.addr K)`:
 
 ```scheme

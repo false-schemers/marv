@@ -1435,7 +1435,7 @@
                              ((const c-const record struct macro)
                               (mloop (cdr its) acc))
                              ((func)
-                              (mloop (cdr its) (cons (lower-func-def (expand-func-macros it)) acc)))
+                              (mloop (cdr its) (cons (lower-func-def (expand-func-macros (normalize-func-locals it))) acc)))
                              (else
                               (mloop (cdr its) (cons it acc))))
                            (mloop (cdr its) (cons it acc)))))))

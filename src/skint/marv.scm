@@ -1050,6 +1050,33 @@
             (else
              (error "unsupported item in (data ...)" it)))))))
 
+;; Expand a shared-type declaration to ordered (name . type) entries.
+(define (parse-local-declaration item)
+  (if (or (not (list? item)) (< (length item) 3))
+      (error "malformed (local $name ... type)" item)
+      (let* ((reversed (reverse (cdr item)))
+             (type (car reversed))
+             (names (reverse (cdr reversed))))
+        (if (not (memq type '(i32 i64 f32 f64 ptr)))
+            (error "invalid local type" item))
+        (map (lambda (name)
+               (if (and (symbol? name) (string-prefix? "$" (symbol->string name)))
+                   (cons name type)
+                   (error "invalid local name" item)))
+             names))))
+
+;; Normalize before macro expansion and lowering, so their type environments
+;; see every local exactly as if it had its own declaration.
+(define (normalize-func-locals form)
+  (append (list (car form) (cadr form))
+          (apply append
+            (map (lambda (clause)
+                   (if (and (pair? clause) (eq? (car clause) 'local))
+                       (map (lambda (entry) (list 'local (car entry) (cdr entry)))
+                            (parse-local-declaration clause))
+                       (list clause)))
+                 (cddr form)))))
+
 ;; Parse a (func ...) form
 (define (parse-func form)
   (let* ((name (cadr form))
@@ -1092,11 +1119,9 @@
                   ((frame)
                    (loop (cdr r) params res-type (cadr item) locals body-forms pcount))
                   ((local)
-                   (if (and (= (length item) 3) (symbol? (cadr item)))
-                       (loop (cdr r) params res-type frame-size
-                             (cons (cons (cadr item) (caddr item)) locals)
-                             body-forms pcount)
-                       (error "malformed (local $name type)" item)))
+                   (loop (cdr r) params res-type frame-size
+                         (append (reverse (parse-local-declaration item)) locals)
+                         body-forms pcount))
                   ((body)
                    (loop (cdr r) params res-type frame-size locals
                          (append (reverse (cdr item)) body-forms) pcount))
@@ -6204,7 +6229,7 @@ static inline marv_f64 marv_f64_reinterpret_i64(marv_i64 a) {
                              ((const c-const record struct macro)
                               (mloop (cdr its) acc))
                              ((func)
-                              (mloop (cdr its) (cons (lower-func-def (expand-func-macros it)) acc)))
+                              (mloop (cdr its) (cons (lower-func-def (expand-func-macros (normalize-func-locals it))) acc)))
                              (else
                               (mloop (cdr its) (cons it acc))))
                            (mloop (cdr its) (cons it acc)))))))

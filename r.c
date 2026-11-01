@@ -3584,11 +3584,24 @@ size_t fn_header(mod_t *pm, snode_t *pn, fn_t *pf)
     } else if (streql(k, "frame")) {
       if (snlen(pc) > 1 && snref(pc, 1)->nt == SN_INT) pf->frame = snref(pc, 1)->ival;
     } else if (streql(k, "local")) {
-      var_t *pv;
-      if (snlen(pc) < 3) break;
-      pv = (var_t *)bufnewbk(&pf->vars);
-      pv->name = snref(pc, 1)->sym;
-      pv->vt = vt_of_sym(snref(pc, 2)->sym);
+      size_t j, n;
+      vt_t vt;
+      snode_t *type;
+      n = snlen(pc);
+      if (n < 3) sneprintf(pc, "(local $name ... type) needs a name and type");
+      type = snref(pc, n - 1);
+      if (type->nt != SN_SYM || (vt = vt_of_sym(type->sym)) == VT_VOID)
+        sneprintf(pc, "(local $name ... type) needs a scalar type");
+      for (j = 1; j + 1 < n; ++j) {
+        snode_t *name;
+        var_t *pv;
+        name = snref(pc, j);
+        if (name->nt != SN_SYM || symname(name->sym)[0] != '$')
+          sneprintf(pc, "(local $name ... type) needs local names");
+        pv = (var_t *)bufnewbk(&pf->vars);
+        pv->name = name->sym;
+        pv->vt = vt;
+      }
     } else {
       break;                              /* the body starts here */
     }

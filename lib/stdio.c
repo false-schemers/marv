@@ -1729,6 +1729,7 @@ void perror(const char *s)
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <ctype.h>
 #include <math.h>
 
 typedef int32_t  marv_i32;
@@ -1969,184 +1970,180 @@ static void sink_put_mem(marv_out_sink_t *s, const char *p, size_t n) {
   }
 }
 
+/* Appending to a host conversion format must never silently truncate it. */
+static int fmt_char(char *spec, size_t *len, char ch) {
+  if (*len + 1 >= 64) return 0;
+  spec[(*len)++] = ch;
+  spec[*len] = '\0';
+  return 1;
+}
+
+static int fmt_uint(char *spec, size_t *len, unsigned int n) {
+  char digits[32];
+  int count, i;
+  count = snprintf(digits, sizeof(digits), "%u", n);
+  if (count < 0 || (size_t)count >= sizeof(digits)) return 0;
+  for (i = 0; i < count; ++i)
+    if (!fmt_char(spec, len, digits[i])) return 0;
+  return 1;
+}
+
+/* V must be a local without side effects: a long result is formatted twice. */
+#define MARV_EMIT_FORMATTED(V) do { \
+  int marv_n_ = snprintf(tmp, sizeof(tmp), spec, (V)); \
+  if (marv_n_ < 0) return -1; \
+  if ((size_t)marv_n_ < sizeof(tmp)) { \
+    sink_put_mem(sink, tmp, (size_t)marv_n_); \
+  } else { \
+    char *marv_buf_ = (char *)malloc((size_t)marv_n_ + 1); \
+    int marv_n2_; \
+    if (marv_buf_ == NULL) return -1; \
+    marv_n2_ = snprintf(marv_buf_, (size_t)marv_n_ + 1, spec, (V)); \
+    if (marv_n2_ != marv_n_) { free(marv_buf_); return -1; } \
+    sink_put_mem(sink, marv_buf_, (size_t)marv_n_); \
+    free(marv_buf_); \
+  } \
+} while (0)
+
 static marv_i32 marv_format_engine(marv_out_sink_t *sink, const char *fmt, const marv_va_arg_t *va) {
+  const char *p;
   if (!fmt) return 0;
-  const char *p = fmt;
+  p = fmt;
   while (*p) {
-    if (*p != '%') {
-      sink_put_char(sink, *p++);
-      continue;
-    }
-    p++; /* skip '%' */
-    if (*p == '%') {
-      sink_put_char(sink, *p++);
-      continue;
-    }
-
-    /* Build a normalized single-specifier format string for host snprintf */
-    char spec[64];
-    size_t si = 0;
-    spec[si++] = '%';
-
-    /* Flags */
+    char spec[64], tmp[512];
+    size_t si;
+    int left, plus, space, alternate, zero, len_mod;
+    char conv;
+    if (*p != '%') { sink_put_char(sink, *p++); continue; }
+    ++p;
+    if (*p == '%') { sink_put_char(sink, *p++); continue; }
+    left = plus = space = alternate = zero = 0;
     while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0') {
-      if (si < 48) spec[si++] = *p;
-      p++;
+      if (*p == '-') left = 1;
+      else if (*p == '+') plus = 1;
+      else if (*p == ' ') space = 1;
+      else if (*p == '#') alternate = 1;
+      else zero = 1;
+      ++p;
     }
-
-    /* Width */
+    si = 0; spec[0] = '\0';
+    if (!fmt_char(spec, &si, '%')) return -1;
+    /* A negative dynamic width is equivalent to the '-' flag. */
     if (*p == '*') {
       int w = va ? (int)(va++)->va_int : 0;
-      si += (size_t)snprintf(spec + si, sizeof(spec) - si, "%d", w);
-      p++;
+      unsigned int magnitude = w < 0 ? 0u - (unsigned int)w : (unsigned int)w;
+      if (w < 0) left = 1;
+      if (left && !fmt_char(spec, &si, '-')) return -1;
+      if (plus && !fmt_char(spec, &si, '+')) return -1;
+      if (space && !fmt_char(spec, &si, ' ')) return -1;
+      if (alternate && !fmt_char(spec, &si, '#')) return -1;
+      if (zero && !fmt_char(spec, &si, '0')) return -1;
+      if (magnitude != 0 && !fmt_uint(spec, &si, magnitude)) return -1;
+      ++p;
     } else {
-      while (*p >= '0' && *p <= '9') {
-        if (si < 48) spec[si++] = *p;
-        p++;
-      }
+      if (left && !fmt_char(spec, &si, '-')) return -1;
+      if (plus && !fmt_char(spec, &si, '+')) return -1;
+      if (space && !fmt_char(spec, &si, ' ')) return -1;
+      if (alternate && !fmt_char(spec, &si, '#')) return -1;
+      if (zero && !fmt_char(spec, &si, '0')) return -1;
+      while (*p >= '0' && *p <= '9')
+        if (!fmt_char(spec, &si, *p++)) return -1;
     }
-
-    /* Precision */
     if (*p == '.') {
-      if (si < 48) spec[si++] = *p++;
+      ++p;
       if (*p == '*') {
-        int pr = va ? (int)(va++)->va_int : 0;
-        si += (size_t)snprintf(spec + si, sizeof(spec) - si, "%d", pr);
-        p++;
+        int precision = va ? (int)(va++)->va_int : 0;
+        ++p;
+        if (precision >= 0 && (!fmt_char(spec, &si, '.') ||
+                               !fmt_uint(spec, &si, (unsigned int)precision))) return -1;
       } else {
-        while (*p >= '0' && *p <= '9') {
-          if (si < 48) spec[si++] = *p;
-          p++;
-        }
+        if (!fmt_char(spec, &si, '.')) return -1;
+        while (*p >= '0' && *p <= '9')
+          if (!fmt_char(spec, &si, *p++)) return -1;
       }
     }
-
-    /* Length modifier: in WCPL/MARV, int/long/size_t are 32-bit, long long/intmax_t are 64-bit */
-    int is_64 = 0;
-    if (*p == 'h') {
-      p++;
-      if (*p == 'h') p++;
-    } else if (*p == 'l') {
-      p++;
-      if (*p == 'l') {
-        is_64 = 1;
-        p++;
-      }
-    } else if (*p == 'j') {
-      is_64 = 1;
-      p++;
-    } else if (*p == 'z' || *p == 't') {
-      p++;
-    }
-
-    char conv = *p;
+    /* 0=32-bit, 1=8-bit, 2=16-bit, 3=64-bit. */
+    len_mod = 0;
+    if (*p == 'h') { ++p; if (*p == 'h') { ++p; len_mod = 1; } else len_mod = 2; }
+    else if (*p == 'l') { ++p; if (*p == 'l') { ++p; len_mod = 3; } }
+    else if (*p == 'j') { ++p; len_mod = 3; }
+    else if (*p == 'z' || *p == 't') ++p;
+    conv = *p;
     if (!conv) break;
-    p++;
-
-    char tmp[512];
-    int n = 0;
+    ++p;
+    if (conv == 'n') {
+      marv_ptr np = va ? MARV_VA_PTR(va++) : MARV_NULL;
+      if (np) {
+        if (len_mod == 1) marv_i32_store8(np, 0, (marv_i32)sink->idx);
+        else if (len_mod == 2) marv_i32_store16(np, 0, (marv_i32)sink->idx);
+        else if (len_mod == 3) marv_i64_store(np, 0, (marv_i64)sink->idx);
+        else marv_i32_store(np, 0, (marv_i32)sink->idx);
+      }
+      continue;
+    }
+    if (len_mod == 3 && (conv == 'd' || conv == 'i' || conv == 'u' ||
+                         conv == 'x' || conv == 'X' || conv == 'o')) {
+      if (!fmt_char(spec, &si, 'l') || !fmt_char(spec, &si, 'l')) return -1;
+    }
+    if (!fmt_char(spec, &si, conv)) return -1;
     switch (conv) {
-      case 'd':
-      case 'i':
-        if (is_64) {
+      case 'd': case 'i':
+        if (len_mod == 3) {
           long long v = va ? (long long)(va++)->va_llong : 0LL;
-          spec[si++] = 'l'; spec[si++] = 'l'; spec[si++] = conv; spec[si] = '\0';
-          n = snprintf(tmp, sizeof(tmp), spec, v);
+          MARV_EMIT_FORMATTED(v);
         } else {
           int v = va ? (int)(va++)->va_int : 0;
-          spec[si++] = conv; spec[si] = '\0';
-          n = snprintf(tmp, sizeof(tmp), spec, v);
+          if (len_mod == 1 || len_mod == 2) {
+            unsigned int mask = len_mod == 1 ? 255u : 65535u;
+            unsigned int sign = len_mod == 1 ? 128u : 32768u;
+            unsigned int bits = (unsigned int)v & mask;
+            v = bits < sign ? (int)bits : (int)bits - (int)(mask + 1u);
+          }
+          MARV_EMIT_FORMATTED(v);
         }
-        if (n > 0) sink_put_mem(sink, tmp, (size_t)n);
         break;
-
-      case 'u':
-      case 'x':
-      case 'X':
-      case 'o':
-        if (is_64) {
+      case 'u': case 'x': case 'X': case 'o':
+        if (len_mod == 3) {
           unsigned long long v = va ? (unsigned long long)(va++)->va_ullong : 0ULL;
-          spec[si++] = 'l'; spec[si++] = 'l'; spec[si++] = conv; spec[si] = '\0';
-          n = snprintf(tmp, sizeof(tmp), spec, v);
+          MARV_EMIT_FORMATTED(v);
         } else {
           unsigned int v = va ? (unsigned int)(va++)->va_uint : 0U;
-          spec[si++] = conv; spec[si] = '\0';
-          n = snprintf(tmp, sizeof(tmp), spec, v);
+          if (len_mod == 1) v &= 255u;
+          else if (len_mod == 2) v &= 65535u;
+          MARV_EMIT_FORMATTED(v);
         }
-        if (n > 0) sink_put_mem(sink, tmp, (size_t)n);
         break;
-
-      case 'f':
-      case 'F':
-      case 'e':
-      case 'E':
-      case 'g':
-      case 'G':
-      case 'a':
-      case 'A': {
+      case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
         double v = va ? (double)(va++)->va_double : 0.0;
-        spec[si++] = conv; spec[si] = '\0';
-        n = snprintf(tmp, sizeof(tmp), spec, v);
-        if (n > 0) sink_put_mem(sink, tmp, (size_t)n);
+        MARV_EMIT_FORMATTED(v);
         break;
       }
-
       case 'c': {
         int v = va ? (int)(va++)->va_int : 0;
-        spec[si++] = 'c'; spec[si] = '\0';
-        n = snprintf(tmp, sizeof(tmp), spec, v);
-        if (n > 0) sink_put_mem(sink, tmp, (size_t)n);
+        MARV_EMIT_FORMATTED(v);
         break;
       }
-
       case 's': {
-        const char *sv = va ? (const char *)MARV_VA_PTR(va++) : "(null)";
-        if (!sv) sv = "(null)";
-        spec[si++] = 's'; spec[si] = '\0';
-        /* Handle strings longer than tmp if needed */
-        n = snprintf(tmp, sizeof(tmp), spec, sv);
-        if (n > 0 && (size_t)n < sizeof(tmp)) {
-          sink_put_mem(sink, tmp, (size_t)n);
-        } else if (n >= (int)sizeof(tmp)) {
-          char *dyn = (char *)malloc((size_t)n + 1);
-          if (dyn) {
-            snprintf(dyn, (size_t)n + 1, spec, sv);
-            sink_put_mem(sink, dyn, (size_t)n);
-            free(dyn);
-          }
-        }
+        const char *v = va ? (const char *)MARV_VA_PTR(va++) : "(null)";
+        if (!v) v = "(null)";
+        MARV_EMIT_FORMATTED(v);
         break;
       }
-
       case 'p': {
-        void *pv = va ? (void *)MARV_VA_PTR(va++) : NULL;
-        spec[si++] = 'p'; spec[si] = '\0';
-        n = snprintf(tmp, sizeof(tmp), spec, pv);
-        if (n > 0) sink_put_mem(sink, tmp, (size_t)n);
+        void *v = va ? (void *)MARV_VA_PTR(va++) : NULL;
+        MARV_EMIT_FORMATTED(v);
         break;
       }
-
-      case 'n': {
-        marv_ptr np = va ? MARV_VA_PTR(va++) : MARV_NULL;
-        if (np) {
-          if (is_64) marv_i64_store(np, 0, (marv_i64)sink->idx);
-          else marv_i32_store(np, 0, (marv_i32)sink->idx);
-        }
-        break;
-      }
-
-      default:
-        sink_put_char(sink, conv);
-        break;
+      default: sink_put_char(sink, conv); break;
     }
   }
-
   if (!sink->fp && sink->buf && sink->maxlen > 0) {
     size_t term = (sink->idx < sink->maxlen) ? sink->idx : (sink->maxlen - 1);
     sink->buf[term] = '\0';
   }
   return (marv_i32)sink->idx;
 }
+#undef MARV_EMIT_FORMATTED
 
 marv_i32 stdio_vsnprintf(marv_ptr s, marv_i32 count, marv_ptr format, marv_ptr va) {
   marv_out_sink_t sink;
@@ -2201,160 +2198,216 @@ marv_i32 stdio_printf(marv_ptr format, marv_ptr ap) {
  * Formatted Input Engine (`scanf`, `fscanf`, `sscanf`, `snscanf`)
  * -------------------------------------------------------------------------- */
 
-marv_i32 stdio_vsscanf(marv_ptr s, marv_ptr format, marv_ptr va) {
-  const char *inp = (const char *)s;
-  const char *fmt = (const char *)format;
-  const marv_va_arg_t *ap = (const marv_va_arg_t *)(uintptr_t)va;
-  if (!inp || !fmt) return -1;
+/* A single scanner for streams and strings.  pos is the number of consumed
+ * bytes, not the amount read ahead: file peeking uses one guaranteed ungetc. */
+typedef struct marv_scan_source {
+  FILE *fp;
+  const char *text;
+  size_t pos;
+} marv_scan_source_t;
 
+static int scan_peek(marv_scan_source_t *src) {
+  int ch;
+  if (!src->fp) {
+    ch = (unsigned char)src->text[src->pos];
+    return ch ? ch : EOF;
+  }
+  ch = fgetc(src->fp);
+  if (ch != EOF && ungetc(ch, src->fp) == EOF) return EOF;
+  return ch;
+}
+
+static int scan_take(marv_scan_source_t *src) {
+  int ch;
+  if (src->fp) ch = fgetc(src->fp);
+  else {
+    ch = (unsigned char)src->text[src->pos];
+    if (!ch) ch = EOF;
+  }
+  if (ch != EOF) ++src->pos;
+  return ch;
+}
+
+/* The host scanner consumes just one conversion; %n records the exact input
+ * consumed including its leading whitespace.  Arguments are typed at each use. */
+#define MARV_SCAN_ONE(SRC, SPEC, VALUE, USED) \
+  ((SRC)->fp ? fscanf((SRC)->fp, (SPEC), (VALUE), (USED)) : \
+               sscanf((SRC)->text + (SRC)->pos, (SPEC), (VALUE), (USED)))
+#define MARV_SCAN_SUPPRESSED(SRC, SPEC, USED) \
+  ((SRC)->fp ? fscanf((SRC)->fp, (SPEC), (USED)) : \
+               sscanf((SRC)->text + (SRC)->pos, (SPEC), (USED)))
+
+static marv_i32 marv_scan_engine(marv_scan_source_t *src, const char *format,
+                                  const marv_va_arg_t *ap) {
+  const char *fp = format;
   int assigned = 0;
-  const char *ip = inp;
-  const char *fp = fmt;
-
+  if (!format) return -1;
   while (*fp) {
-    if (*fp == ' ' || *fp == '\t' || *fp == '\n' || *fp == '\r') {
-      while (*fp == ' ' || *fp == '\t' || *fp == '\n' || *fp == '\r') fp++;
-      while (*ip == ' ' || *ip == '\t' || *ip == '\n' || *ip == '\r') ip++;
-      continue;
-    }
-    if (*fp != '%') {
-      if (*ip != *fp) break;
-      ip++; fp++;
-      continue;
-    }
-    fp++; /* skip '%' */
-    if (*fp == '%') {
-      if (*ip != '%') break;
-      ip++; fp++;
-      continue;
-    }
-
-    char spec[64];
+    char spec[128];
     size_t si = 0;
+    int suppress, len_mod, consumed, r, ch;
+    char conv;
+    marv_ptr dst;
+    if (isspace((unsigned char)*fp)) {
+      do { ++fp; } while (isspace((unsigned char)*fp));
+      while ((ch = scan_peek(src)) != EOF && isspace((unsigned char)ch)) scan_take(src);
+      continue;
+    }
+    if (*fp != '%' || fp[1] == '%') {
+      if (*fp == '%') ++fp;
+      ch = scan_peek(src);
+      if (ch == EOF) return assigned ? assigned : -1;
+      if (ch != (unsigned char)*fp) return assigned;
+      scan_take(src); ++fp;
+      continue;
+    }
+    ++fp;
+    suppress = (*fp == '*');
+    if (suppress) ++fp;
     spec[si++] = '%';
-
-    int suppress = 0;
-    if (*fp == '*') {
-      suppress = 1;
-      spec[si++] = '*';
-      fp++;
-    }
+    if (suppress) spec[si++] = '*';
     while (*fp >= '0' && *fp <= '9') {
-      if (si < 48) spec[si++] = *fp;
-      fp++;
+      if (si + 8 >= sizeof(spec)) return assigned;
+      spec[si++] = *fp++;
     }
-
-    int len_mod = 0; /* 0=32b, 1=8b(hh), 2=16b(h), 3=64b(ll/j), 4=double(l on float) */
-    if (*fp == 'h') {
-      fp++;
-      if (*fp == 'h') { len_mod = 1; fp++; }
-      else len_mod = 2;
-    } else if (*fp == 'l') {
-      fp++;
-      if (*fp == 'l') { len_mod = 3; fp++; }
-      else len_mod = 4;
-    } else if (*fp == 'j') {
-      len_mod = 3; fp++;
-    } else if (*fp == 'z' || *fp == 't') {
-      fp++;
-    }
-
-    char conv = *fp;
+    /* 0=32-bit, 1=8-bit, 2=16-bit, 3=64-bit, 4=double float. */
+    len_mod = 0;
+    if (*fp == 'h') { ++fp; if (*fp == 'h') { ++fp; len_mod = 1; } else len_mod = 2; }
+    else if (*fp == 'l') { ++fp; if (*fp == 'l') { ++fp; len_mod = 3; } else len_mod = 4; }
+    else if (*fp == 'j') { ++fp; len_mod = 3; }
+    else if (*fp == 'z' || *fp == 't') ++fp;
+    conv = *fp;
     if (!conv) break;
-    fp++;
-
+    ++fp;
     if (conv == 'n') {
       if (!suppress && ap) {
-        marv_ptr dst = MARV_VA_PTR(ap++);
-        if (dst) marv_i32_store(dst, 0, (marv_i32)(ip - inp));
+        dst = MARV_VA_PTR(ap++);
+        if (dst) {
+          if (len_mod == 1) marv_i32_store8(dst, 0, (marv_i32)src->pos);
+          else if (len_mod == 2) marv_i32_store16(dst, 0, (marv_i32)src->pos);
+          else if (len_mod == 3) marv_i64_store(dst, 0, (marv_i64)src->pos);
+          else marv_i32_store(dst, 0, (marv_i32)src->pos);
+        }
       }
       continue;
     }
-
-    int consumed = 0;
-    int r = 0;
+    if (conv != 'd' && conv != 'i' && conv != 'u' && conv != 'x' &&
+        conv != 'X' && conv != 'o' && conv != 'f' && conv != 'F' &&
+        conv != 'e' && conv != 'E' && conv != 'g' && conv != 'G' &&
+        conv != 'a' && conv != 'A' && conv != 's' && conv != 'c' &&
+        conv != '[' && conv != 'p') return assigned;
+    if (!suppress && (conv == 'd' || conv == 'i' || conv == 'u' ||
+                      conv == 'x' || conv == 'X' || conv == 'o')) {
+      spec[si++] = 'l'; spec[si++] = 'l';
+    } else if (!suppress && (conv == 'f' || conv == 'F' || conv == 'e' ||
+                             conv == 'E' || conv == 'g' || conv == 'G' ||
+                             conv == 'a' || conv == 'A')) spec[si++] = 'l';
+    spec[si++] = conv;
+    if (conv == '[') {
+      if (*fp == '^') spec[si++] = *fp++;
+      if (*fp == ']') spec[si++] = *fp++;
+      while (*fp && *fp != ']') {
+        if (si + 4 >= sizeof(spec)) return assigned;
+        spec[si++] = *fp++;
+      }
+      if (*fp != ']') return assigned;
+      spec[si++] = *fp++;
+    }
+    spec[si++] = '%'; spec[si++] = 'n'; spec[si] = '\0';
+    consumed = -1;
     if (suppress) {
-      spec[si++] = conv;
-      spec[si++] = '%'; spec[si++] = 'n'; spec[si] = '\0';
-      r = sscanf(ip, spec, &consumed);
-      if (consumed <= 0) break;
-      ip += consumed;
+      r = MARV_SCAN_SUPPRESSED(src, spec, &consumed);
+      if (consumed < 0) return r == EOF && !assigned ? -1 : assigned;
+      src->pos += (size_t)consumed;
       continue;
     }
-
-    marv_ptr dst = ap ? MARV_VA_PTR(ap++) : MARV_NULL;
+    dst = ap ? MARV_VA_PTR(ap++) : MARV_NULL;
     switch (conv) {
       case 'd': case 'i': {
         long long v = 0;
-        spec[si++] = 'l'; spec[si++] = 'l'; spec[si++] = conv;
-        spec[si++] = '%'; spec[si++] = 'n'; spec[si] = '\0';
-        r = sscanf(ip, spec, &v, &consumed);
-        if (r != 1) return (assigned == 0 && *ip == '\0') ? -1 : assigned;
+        r = MARV_SCAN_ONE(src, spec, &v, &consumed);
+        if (r != 1) return r == EOF && !assigned ? -1 : assigned;
         if (dst) {
           if (len_mod == 1) marv_i32_store8(dst, 0, (marv_i32)v);
           else if (len_mod == 2) marv_i32_store16(dst, 0, (marv_i32)v);
           else if (len_mod == 3) marv_i64_store(dst, 0, (marv_i64)v);
           else marv_i32_store(dst, 0, (marv_i32)v);
         }
-        assigned++;
-        ip += consumed;
         break;
       }
       case 'u': case 'x': case 'X': case 'o': {
         unsigned long long v = 0;
-        spec[si++] = 'l'; spec[si++] = 'l'; spec[si++] = conv;
-        spec[si++] = '%'; spec[si++] = 'n'; spec[si] = '\0';
-        r = sscanf(ip, spec, &v, &consumed);
-        if (r != 1) return (assigned == 0 && *ip == '\0') ? -1 : assigned;
+        r = MARV_SCAN_ONE(src, spec, &v, &consumed);
+        if (r != 1) return r == EOF && !assigned ? -1 : assigned;
         if (dst) {
           if (len_mod == 1) marv_i32_store8(dst, 0, (marv_i32)v);
           else if (len_mod == 2) marv_i32_store16(dst, 0, (marv_i32)v);
           else if (len_mod == 3) marv_i64_store(dst, 0, (marv_i64)v);
           else marv_i32_store(dst, 0, (marv_i32)v);
         }
-        assigned++;
-        ip += consumed;
         break;
       }
-      case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': {
-        double v = 0.0;
-        spec[si++] = 'l'; spec[si++] = conv;
-        spec[si++] = '%'; spec[si++] = 'n'; spec[si] = '\0';
-        r = sscanf(ip, spec, &v, &consumed);
-        if (r != 1) return (assigned == 0 && *ip == '\0') ? -1 : assigned;
+      case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': case 'a': case 'A': {
+        double v = 0;
+        r = MARV_SCAN_ONE(src, spec, &v, &consumed);
+        if (r != 1) return r == EOF && !assigned ? -1 : assigned;
         if (dst) {
           if (len_mod == 4) marv_f64_store(dst, 0, (marv_f64)v);
           else marv_f32_store(dst, 0, (marv_f32)v);
         }
-        assigned++;
-        ip += consumed;
         break;
       }
-      case 's': case 'c': {
-        spec[si++] = conv;
-        spec[si++] = '%'; spec[si++] = 'n'; spec[si] = '\0';
-        r = sscanf(ip, spec, (char *)dst, &consumed);
-        if (r != 1) return (assigned == 0 && *ip == '\0') ? -1 : assigned;
-        assigned++;
-        ip += consumed;
+      case 'p': {
+        void *v = NULL;
+        r = MARV_SCAN_ONE(src, spec, &v, &consumed);
+        if (r != 1) return r == EOF && !assigned ? -1 : assigned;
+        if (dst) marv_ptr_store(dst, 0, v);
         break;
       }
       default:
-        return assigned;
+        if (!dst) return assigned;
+        r = MARV_SCAN_ONE(src, spec, (char *)dst, &consumed);
+        if (r != 1) return r == EOF && !assigned ? -1 : assigned;
+        break;
     }
+    if (consumed < 0) return assigned;
+    src->pos += (size_t)consumed;
+    ++assigned;
   }
   return (marv_i32)assigned;
 }
+#undef MARV_SCAN_ONE
+#undef MARV_SCAN_SUPPRESSED
+
+marv_i32 stdio_vsscanf(marv_ptr s, marv_ptr format, marv_ptr va) {
+  marv_scan_source_t src;
+  if (!s || !format) return -1;
+  src.fp = NULL; src.text = (const char *)s; src.pos = 0;
+  return marv_scan_engine(&src, (const char *)format, (const marv_va_arg_t *)(uintptr_t)va);
+}
 
 marv_i32 stdio_vsnscanf(marv_ptr s, marv_i32 count, marv_ptr format, marv_ptr va) {
-  (void)count;
-  return stdio_vsscanf(s, format, va);
+  const char *input = (const char *)s;
+  size_t limit = (size_t)(uint32_t)count, len = 0;
+  char *copy;
+  marv_i32 result;
+  if (!input || !format) return -1;
+  while (len < limit && input[len] != '\0') ++len;
+  if (len == (size_t)-1) return -1;
+  copy = (char *)malloc(len + 1);
+  if (!copy) return -1;
+  memcpy(copy, input, len);
+  copy[len] = '\0';
+  result = stdio_vsscanf(copy, format, va);
+  free(copy);
+  return result;
 }
 
 marv_i32 stdio_vfscanf(marv_ptr stream, marv_ptr format, marv_ptr va) {
-  char buf[1024];
-  if (!fgets(buf, sizeof(buf), stdio_resolve_fp(stream))) return -1;
-  return stdio_vsscanf((marv_ptr)buf, format, va);
+  marv_scan_source_t src;
+  src.fp = stdio_resolve_fp(stream); src.text = NULL; src.pos = 0;
+  if (!src.fp || !format) return -1;
+  return marv_scan_engine(&src, (const char *)format, (const marv_va_arg_t *)(uintptr_t)va);
 }
 
 marv_i32 stdio_vscanf(marv_ptr format, marv_ptr va) {

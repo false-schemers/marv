@@ -230,9 +230,18 @@ Inside `(module ...)`:
   [(param ...)]                      ;; Marks function as variadic (see Section 7.3)
   [(result <type> | (record $R))]    ;; Optional single return value or record return
   [(frame <bytes>)]                  ;; Optional addressable stack frame size
-  (local $l1 <type>) ...             ;; Zero-initialized virtual registers
+  (local $l1 [$l2 ...] <type>) ...   ;; One or more zero-initialized registers
   <instr> ...)
 ```
+
+A local declaration may name one or more variables followed by their shared
+scalar type (`i32`, `i64`, `f32`, `f64`, or `ptr`). For example,
+`(local $t1 $t2 $t3 ptr)` is equivalent to three separate declarations
+`(local $t1 ptr)`, `(local $t2 ptr)`, and `(local $t3 ptr)`, in that order.
+Each variable is independently initialized to zero (or `ptr.null`). The
+existing single-name form remains valid. The declaration requires at least
+one name; this shorthand applies to `local`, not `param` or a macro's
+`(locals ...)` clause.
 
 All `(param ...)`, `(result ...)`, `(frame ...)`, and `(local ...)` declarations must precede the instruction body.
 
