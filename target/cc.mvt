@@ -8,8 +8,8 @@
   (type     cc)
   (obj-ext  ".c")
   (cc       "cc")
-  (cflags   ("-std=c99" "-O2" "-D_DEFAULT_SOURCE" "-D_XOPEN_SOURCE=700"
+  (cflags   ("-std=c99" "~O2" "-D_DEFAULT_SOURCE" "-D_XOPEN_SOURCE=700"
              "-Wno-unused-variable" "-Wno-unused-function" "-Wno-unused-label" "-Wno-main"))
   (ldflags  ())
   (ldlibs   ("-lm"))
-  (link-cmd "cc -std=c99 -O2 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=700 -Wno-unused-variable -Wno-unused-function -Wno-unused-label -Wno-main ~src -o ~exe -lm"))
+  (link-cmd "cc -std=c99 ~O2 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=700 -Wno-unused-variable -Wno-unused-function -Wno-unused-label -Wno-main ~src -o ~exe -lm"))

@@ -7,10 +7,9 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_WORK=$(mktemp -d /tmp/marv-suite.XXXXXXXX)
 trap 'rm -rf "$TEST_WORK"' EXIT
 ROOT_DIR="$TEST_WORK/repo"
-mkdir -p "$ROOT_DIR/src"
+mkdir -p "$ROOT_DIR"
 cp "$SOURCE_DIR"/{m,r,v,a}.{c,h} "$ROOT_DIR/"
 cp -R "$SOURCE_DIR"/{test,examples,lib,srt,target} "$ROOT_DIR/"
-cp -R "$SOURCE_DIR/src/skint" "$ROOT_DIR/src/"
 cd "$ROOT_DIR"
 
 # Tool locations. Everything can be overridden from the environment so the
@@ -33,7 +32,6 @@ SKINT_FLAGS=""
 [ -n "$SKINT_LIB" ] && SKINT_FLAGS="-I $SKINT_LIB"
 
 SKINT="$SKINT_BIN $SKINT_FLAGS -q"
-MARV_SKINT="$SKINT_BIN $SKINT_FLAGS -p $ROOT_DIR/src/skint/marv.scm"
 MARV_BIN="$TEST_WORK/gh_marv_bin"
 
 WCPL_HOME=${WCPL_HOME:-/home/user/wcpl}
@@ -66,8 +64,8 @@ done
 echo "  [PASS] All $NADAPTERS lib/*.c and srt/*.c adapters compiled cleanly under both cc and wcpl -c!"
 
 echo ""
-echo "2. Running unit & RV64G simulation test suite (test/test.scm)..."
-$SKINT test/test.scm
+echo "2. Testing backend optimization selection..."
+bash test/optimization.sh "$MARV_BIN"
 
 echo ""
 echo "3. Testing the marv binary (-c mode and link mode)..."
@@ -77,13 +75,9 @@ for ex in dirent_demo libc_demo queens; do
     "$MARV_BIN" -T target -t "$t" -c "examples/$ex.mvs"
     test -f "examples/$ex.$ext"
   done
-  # a .wo object is fully determined by the module, so it is compared exactly;
-  # what the cc and rv64g targets emit is checked by running it, in 3 and 6
-  $MARV_SKINT -T target -t wcpl -c -o "$TEST_WORK/gh_marv_alt_${ex}.wo" "examples/$ex.mvs"
-  diff -u "$TEST_WORK/gh_marv_alt_${ex}.wo" "examples/$ex.wo"
 done
 rm -f examples/*.c examples/*.wo examples/*.s
-echo "  [PASS] marv generated .c, .wo and .s for every example, and each .wo exactly!"
+echo "  [PASS] marv generated .c, .wo and .s for every example!"
 
 "$MARV_BIN" -v -T target -t cc -o $TEST_WORK/gh_marv_dirent examples/dirent_demo.mvs 2> $TEST_WORK/gh_marv_verbose.err
 grep -q "^marv -t cc -c -o .* examples/dirent_demo.mvs$" $TEST_WORK/gh_marv_verbose.err
@@ -135,6 +129,7 @@ echo "  [PASS] SRFI-270 hex float parsing and emission verified across cc, wcpl,
 
 echo ""
 echo "6. Checking instruction edge cases (test/edge.mvs) against test/edge.expected..."
+$SKINT test/rv64-sim-numbers.scm
 # shift masking, signed/unsigned division, clz/ctz of zero, sign extension,
 # truncation, nearest-ties-to-even, narrow loads, br_table defaults.  [cco]
 "$MARV_BIN" -T target -t cc -o $TEST_WORK/gh_marv_edge test/edge.mvs
@@ -267,11 +262,6 @@ done
 $SKINT test/grouped-locals-rv64.scm "$TEST_WORK/grouped.s"
 $WCPL_BIN -q $WCPL_INC -o "$TEST_WORK/grouped.wasm" "$TEST_WORK/grouped.wo"
 test -s "$TEST_WORK/grouped.wasm"
-$MARV_SKINT -T target -t wcpl -c -o "$TEST_WORK/grouped-skint.wo" test/grouped-locals.mvs
-diff -u "$TEST_WORK/grouped-skint.wo" "$TEST_WORK/grouped.wo"
-$SKINT_BIN $SKINT_FLAGS -p "$ROOT_DIR/src/skint/marv-simple.scm" -T target -t wcpl -c \
-  -o "$TEST_WORK/grouped-simple.wo" test/grouped-locals.mvs
-diff -u "$TEST_WORK/grouped-simple.wo" "$TEST_WORK/grouped.wo"
 cat > "$TEST_WORK/grouped-trampoline.mvs" <<'END'
 (module $grouped_trampoline
   (trampoline_func $entry (result ptr)

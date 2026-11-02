@@ -102,11 +102,19 @@ A `.mvt` file defines a single `(marv-target ...)` S-expression used by `marv -t
   (type     cc)          ;; Backend: wcpl | cc | rv64g
   (obj-ext  ".c")        ;; Object extension: ".wo" | ".c" | ".s"
   (cc       "cc")
-  (cflags   ("-std=c99" "-O2"))
+  (cflags   ("-std=c99" "~O2"))
   (ldflags  ())
   (ldlibs   ("-lm"))
-  (link-cmd "cc -std=c99 -O2 ~src -o ~exe -lm"))
+  (link-cmd "cc -std=c99 ~O2 ~src -o ~exe -lm"))
 ```
+
+Optimization placeholders `~O0` through `~O3` in a `link-cmd` or fallback
+`cflags` string become `-O0` through `-O3` by default. MARV's `-O` option
+overrides the level in every such placeholder. Ordinary minus-prefixed flags,
+such as `-O2`, in either `link-cmd` or `cflags` are passed as written and are
+not replaced, even when MARV is invoked with an explicit `-O` option. With no
+placeholder, that option has no effect. See the [command-line reference](cli.md)
+for details.
 
 ---
 

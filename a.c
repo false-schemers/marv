@@ -198,6 +198,22 @@ const char *tt_comment(tt_t t)
   return "/* ";
 }
 
+/* -1 means the target's default; otherwise the requested optimization level. */
+static int g_optlevel = -1;
+
+/* Copy one template item, replacing ~O0 through ~O3 with a compiler option. */
+static size_t put_opt_template(cbuf_t *out, const char *s)
+{
+  if (s[0] == '~' && s[1] == 'O' && s[2] >= '0' && s[2] <= '3') {
+    cbputc('-', out);
+    cbputc('O', out);
+    cbputc(g_optlevel < 0 ? s[2] : '0' + g_optlevel, out);
+    return 3;
+  }
+  cbputc(*s, out);
+  return 1;
+}
+
 /* the clauses of a (marv-target ...) form */
 static void tgt_clause(tgt_t *pt, snode_t *pc, cbuf_t *pfl)
 {
@@ -229,7 +245,11 @@ static void tgt_clause(tgt_t *pt, snode_t *pc, cbuf_t *pfl)
     for (i = 0; i < snlen(pl); ++i) {
       if (snref(pl, i)->nt != SN_STR) continue;
       if (cblen(pfl) > 0) cbputc(' ', pfl);
-      cbputs((const char *)cbdata(&snref(pl, i)->data), pfl);
+      if (streql(k, "cflags")) {
+        const char *s;
+        s = (const char *)cbdata(&snref(pl, i)->data);
+        while (*s != '\0') s += put_opt_template(pfl, s);
+      } else cbputs((const char *)cbdata(&snref(pl, i)->data), pfl);
     }
   }
 }
@@ -561,6 +581,7 @@ static void mvusage(FILE *fp)
   fprintf(fp, "                         generated C into pieces of at most N\n");
   fprintf(fp, "                         functions (default 300; 0 does not cut)\n");
   fprintf(fp, "  -o, --output=FILE      output file; required unless -c is given\n");
+  fprintf(fp, "  -O LEVEL               override target optimization level (0, 1, 2, or 3)\n");
   fprintf(fp, "  -L, --system-dir=DIR   add DIR to the system .mvh and .c lookup path\n");
   fprintf(fp, "  -I, --include-dir=DIR  add DIR to the local .mvh lookup path\n");
   fprintf(fp, "  -v, --verbose          print each step before running it\n");
@@ -1024,7 +1045,7 @@ static bool run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
       } else if (s[0] == '~' && strncmp(s, "~exe", 4) == 0) {
         if (!shell_path(&cmd, out, false, false)) return bad_command_path(&cmd, &src);
         s += 4;
-      } else { cbputc(*s, &cmd); s += 1; }
+      } else s += put_opt_template(&cmd, s);
     }
   } else {
     cbsetf(&cmd, "%s %s -o ", symname(pt->cc), symname(pt->flags));
@@ -1110,7 +1131,7 @@ int main(int argc, char **argv)
           if (c2 == 'c') { conly = true; continue; }
           if (c2 == 'v') { g_verbose = 1; continue; }
           if (c2 == 'n') { g_dryrun = 1; continue; }
-          if (c2 == 't' || c2 == 'T' || c2 == 'o' || c2 == 'L' || c2 == 'I') {
+          if (c2 == 't' || c2 == 'T' || c2 == 'o' || c2 == 'L' || c2 == 'I' || c2 == 'O') {
             opt = c2;
             if (s[k + 1] != '\0') val = s + k + 1;      /* -tcc */
             else if (i + 1 < argc) { i += 1; val = argv[i]; }   /* -t cc */
@@ -1137,6 +1158,13 @@ int main(int argc, char **argv)
       }
       if (opt == 't') targdes = val;
       else if (opt == 'o') outfile = val;
+      else if (opt == 'O') {
+        if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
+          fprintf(stderr, "marv: -O takes 0, 1, 2, or 3, not %s\n", val);
+          return 2;
+        }
+        g_optlevel = val[0] - '0';
+      }
       else if (opt == 'T') dirs_add(&g_tdirs, val);
       else if (opt == 'L') dirs_add(&g_ldirs, val);
       else if (opt == 'S') {

@@ -7,7 +7,7 @@
 ;;   skint test/edge-rv64.scm
 ;; =============================================================================
 
-(import (scheme base)
+(import (scheme base) (scheme char)
         (scheme read)
         (scheme write)
         (scheme file)
@@ -15,7 +15,6 @@
         (skint)
         (skint hidden))
 
-(include "../src/skint/marv.scm")        ; for int->le-bytes and the ieee helpers
 (include "rv64-sim.scm")
 
 (define asm-file

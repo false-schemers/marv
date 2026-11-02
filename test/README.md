@@ -2,14 +2,16 @@
 
 The `test/` directory contains the automated test suite for the MARV compiler, RV64G assembly simulator, standard library headers/adapters, and CLI driver:
 
-- `test/test.scm` — Unit tests for `.mvh` header expansion, `.wo`/`cc`/`rv64g` code generation, `.mvt` target loading, and execution of generated RV64G assembly on the built-in RV64G LP64D simulator (`test/rv64-sim.scm`).
+- `test/test.scm` — Historical Scheme implementation tests; not part of the root compiler suite.
 - `test/rv64-sim.scm` — R7RS RISC-V 64-bit (`RV64G` LP64D) assembly simulator used to verify register allocation, stack frames, tail calls, and standard library calls without requiring physical RISC-V hardware.
+- `test/rv64-sim-numbers.scm` — Tests for the standalone RV64 simulator’s byte and IEEE floating-point helpers.
 - `test/edge.mvs`, `test/edge.expected`, `test/edge-rv64.scm` — Instruction edge cases (shift-count masking, signed and unsigned division and remainder, `clz`/`ctz` of zero, sign extension, truncation, `nearest` ties-to-even, narrow loads with both sign extensions, `br_table` defaults). Each function returns one `i32`, so the `cc` build and the `rv64g` assembly can be compared with each other and with `test/edge.expected`, which holds what WebAssembly semantics require.
 - `test/grouped-locals.mvs`, `test/grouped-locals-rv64.scm` — Grouped local declarations across scalar types, macro use, and RV64G simulation.
+- `test/optimization.sh` — Backend optimization template defaults, overrides, error handling, and native execution; independent of `src/`.
 - `test/native-stdio.c` — Native adapter regressions for bounded formatting, length modifiers, bounded input, and stream scanning.
 - `test/run-tests.sh` — End-to-end test runner that verifies:
   1. Single-source compilation of every `lib/*.c` adapter file under both `cc` and `wcpl -c`.
-  2. All unit and RV64G simulation assertions in `test/test.scm`.
+  2. Backend `-O` template substitution and option validation.
   3. CLI `-c` compile-only mode across `cc`, `wcpl`, and `rv64g`.
   4. CLI compile-and-link mode across single-module and 3-module examples (including mixed object + `.mvs` inputs and automatic standard library `lib/*.c` dependency resolution).
   5. SRFI-270 hexadecimal floating-point literals across all three targets.
@@ -35,10 +37,10 @@ tree.
 Skint must be built with numerical-tower support (for example, `make
 USE_TOWER=1` after a clean build).
 
-Or run the Scheme unit and RV64G simulation test suite directly with `skint`:
+To run only the optimization driver tests against an already built compiler:
 
 ```sh
-skint test/test.scm
+bash test/optimization.sh "$PWD/marv"
 ```
 
 ## Tool locations

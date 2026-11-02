@@ -19,6 +19,7 @@ marv -t TARGDES [-c] [OPTION]... FILE...
 | `-T` | `--target-dir=DIR` | `DIR` | Add `DIR` to the `.mvt` target description lookup path (default: `("target/" "<PREFIX>/target")` or `("target/" "targets/")`). |
 | `-c` | `--compile` | *(none)* | Compile one `.mvs` file into a target object file without linking. |
 | `-o` | `--output=FILE` | `FILE` | Output pathname (optional override in `-c` mode; required executable name when `-c` is omitted). |
+| `-O` | — | `0`, `1`, `2`, or `3` | Override optimization placeholders in the target compiler command (for example, `-O2` or `-O 2`). |
 | `-L` | `--system-dir=DIR` | `DIR` | Add `DIR` to the system `.mvh` header and `.c` adapter lookup path (default: `("lib/" "<PREFIX>/lib")` or `("lib/" "libs/")`). |
 | `-I` | `--include-dir=DIR` | `DIR` | Add `DIR` to the project/local `.mvh` header lookup path (default: `("./")`). |
 | `-v` | `--verbose` | *(none)* | Print each compilation step line and the linker command line to `stderr` before executing. |
@@ -68,6 +69,26 @@ In compile-and-link mode, `marv`:
 2. Inspects the `(include system $...)` dependencies of the input modules, locates the corresponding system `.mvh` headers in the `-L` lookup directories (default `("lib/" "<PREFIX>/lib")` or `("lib/" "libs/")`), and pairs each with its `.c` adapter file in the same directory (`lib/<module>.c`).
 3. Invokes the target compiler/linker defined in the `.mvt` file with `-o FILE`, the module object files, and the required system `.c` adapter files.
 4. Deletes the temporary object files created during the run when the target command succeeds or fails. With `-n`, cleanup is printed instead of performed.
+
+### Backend optimization level
+
+`-O0`, `-O1`, `-O2`, and `-O3` select the optimization level passed to the
+backend compiler, rather than changing MARV's own code generation. The last
+`-O` option wins. In a target's `link-cmd` or fallback `cflags`, a placeholder
+`~O0`, `~O1`, `~O2`, or `~O3` becomes its corresponding `-O` flag by default,
+or the requested `-O` flag when overridden. Ordinary minus-prefixed flags
+such as `-O2` in `link-cmd` or `cflags` are passed as written: even an explicit
+MARV `-O3` does not replace them. If a command contains both a literal flag
+and a placeholder, both are passed to the backend, which determines how they
+interact. If there is no placeholder, MARV's `-O` is silently ignored; the
+bundled WCPL target has no placeholder. The MSVC (`cl`) target uses `~O2`,
+so it receives the substituted flag literally. MSVC accepts `-` as an option
+prefix and supports `-O1` (favor size) and `-O2` (favor speed), but does not
+support `-O0` or `-O3`; it may warn and ignore those flags, or reject them with
+`/options:strict`. MSVC uses `-Od` to disable optimization instead. See
+[Microsoft's optimization options](https://learn.microsoft.com/en-us/cpp/build/reference/o-options-optimize-code?view=msvc-170).
+In `-c` mode no backend compiler is invoked, so `-O` has no effect on the
+emitted target file.
 
 ### Paths passed to the target command
 

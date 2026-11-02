@@ -1,6 +1,5 @@
-(import (scheme base) (scheme read) (scheme write) (scheme file)
+(import (scheme base) (scheme char) (scheme read) (scheme write) (scheme file)
         (scheme process-context) (skint) (skint hidden))
-(include "../src/skint/marv.scm")
 (include "rv64-sim.scm")
 (let* ((path (cadr (command-line)))
        (sim (rv64-load-asm path))

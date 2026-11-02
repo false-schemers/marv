@@ -4,6 +4,48 @@
 ;; allocation, unified stack frame layout, and instruction selection end-to-end.
 ;; =============================================================================
 
+;; Helpers used by the simulator, independent of compiler implementations.
+(define (rv-string-index str ch)
+  (let loop ((i 0))
+    (cond ((= i (string-length str)) #f)
+          ((char=? (string-ref str i) ch) i)
+          (else (loop (+ i 1))))))
+
+(define (rv-align-up n a) (* (quotient (+ n (- a 1)) a) a))
+(define (rv-int->le-bytes value count)
+  (let loop ((n value) (left count))
+    (if (= left 0) '()
+        (cons (modulo n 256) (loop (floor-quotient n 256) (- left 1))))))
+
+;; Encode a Scheme flonum as IEEE bits, rounding to nearest, ties to even.
+(define (rv-flonum->ieee-bits x exponent-bits mantissa-bits bias)
+  (let* ((sign-bit (expt 2 (+ exponent-bits mantissa-bits)))
+         (negative (or (< x 0.0) (and (= x 0.0) (< (/ 1.0 x) 0.0))))
+         (sign (if negative sign-bit 0))
+         (v (abs x))
+         (max-exp (- (expt 2 exponent-bits) 1))
+         (mant-base (expt 2 mantissa-bits)))
+    (cond ((not (= x x)) (+ (* max-exp mant-base) (quotient mant-base 2)))
+          ((= v +inf.0) (+ sign (* max-exp mant-base)))
+          ((= v 0.0) sign)
+          (else
+           (let normalize ((f v) (e 0))
+             (cond ((>= f 2.0) (normalize (/ f 2.0) (+ e 1)))
+                   ((< f 1.0) (normalize (* f 2.0) (- e 1)))
+                   ((< (+ e bias) 1)
+                    (+ sign (exact (round (* (exact v)
+                                             (expt 2 (+ (- bias 1) mantissa-bits)))))))
+                   (else
+                    (let* ((rounded (exact (round (* (exact f) mant-base))))
+                           (carry (>= rounded (* 2 mant-base)))
+                           (exp (+ e bias (if carry 1 0))))
+                      (if (>= exp max-exp)
+                          (+ sign (* max-exp mant-base))
+                          (+ sign (* exp mant-base)
+                             (- (if carry mant-base rounded) mant-base)))))))))))
+(define (rv-flonum->ieee32-bits x) (rv-flonum->ieee-bits x 8 23 127))
+(define (rv-flonum->ieee64-bits x) (rv-flonum->ieee-bits x 11 52 1023))
+
 (define *rv-gp-names*
   '("zero" "ra" "sp" "gp" "tp"
     "t0" "t1" "t2"
@@ -132,7 +174,7 @@
     (substring str i j)))
 
 (define (rv-strip-comment line)
-  (let ((idx (string-index line #\#)))
+  (let ((idx (rv-string-index line #\#)))
     (if idx (substring line 0 idx) line)))
 
 (define (rv-split-tokens str)
@@ -152,8 +194,8 @@
 
 ;; Parse offset(base) e.g. "24(sp)" -> (cons 24 "sp")
 (define (rv-parse-memop str)
-  (let ((lp (string-index str #\())
-        (rp (string-index str #\))))
+  (let ((lp (rv-string-index str #\())
+        (rp (rv-string-index str #\))))
     (if (and lp rp)
         (cons (string->number (substring str 0 lp))
               (substring str (+ lp 1) rp))
@@ -178,7 +220,7 @@
 
     ;; Initialize libc global FILE* variables (`stdin`, `stdout`, `stderr`) in low memory
     (let ((init-ptr! (lambda (addr val)
-                       (let lp ((bs (int->le-bytes val 8)) (i 0))
+                       (let lp ((bs (rv-int->le-bytes val 8)) (i 0))
                          (when (pair? bs)
                            (bytevector-u8-set! mem (+ addr i) (car bs))
                            (lp (cdr bs) (+ i 1)))))))
@@ -188,7 +230,7 @@
 
     (define (align-data! p2)
       (let ((a (expt 2 p2)))
-        (set! data-ptr (align-up data-ptr a))))
+        (set! data-ptr (rv-align-up data-ptr a))))
 
     (for-each
       (lambda (filename)
@@ -236,7 +278,7 @@
                                 (bytevector-u8-set! mem data-ptr b)
                                 (set! data-ptr (+ data-ptr 1))))
                              ((string=? op ".word")
-                              (let ((bs (int->le-bytes (string->number (car args)) 4)))
+                              (let ((bs (rv-int->le-bytes (string->number (car args)) 4)))
                                 (for-each (lambda (b)
                                             (bytevector-u8-set! mem data-ptr b)
                                             (set! data-ptr (+ data-ptr 1)))
@@ -244,7 +286,7 @@
                              ((string=? op ".dword")
                               (let ((n (string->number (car args))))
                                 (if n
-                                    (let ((bs (int->le-bytes n 8)))
+                                    (let ((bs (rv-int->le-bytes n 8)))
                                       (for-each (lambda (b)
                                                   (bytevector-u8-set! mem data-ptr b)
                                                   (set! data-ptr (+ data-ptr 1)))
@@ -272,7 +314,7 @@
                (off (list-ref rel 2))
                (target (or (assoc sym data-syms) (assoc sym code-labels)))
                (tval (+ (if target (cdr target) 0) off))
-               (bs (int->le-bytes tval 8)))
+               (bs (rv-int->le-bytes tval 8)))
           (let blp ((l bs) (i 0))
             (when (pair? l)
               (bytevector-u8-set! mem (+ addr i) (car l))
@@ -313,7 +355,7 @@
     (if (>= u half) (- u full) u)))
 
 (define (sim-store! mem addr val nbytes)
-  (let ((bs (int->le-bytes val nbytes)))
+  (let ((bs (rv-int->le-bytes val nbytes)))
     (let loop ((l bs) (i 0))
       (when (pair? l)
         (bytevector-u8-set! mem (+ addr i) (car l))
@@ -547,10 +589,10 @@
                      (set-fp! (car ops) (ieee32-bits->flonum (get-gp (cadr ops))))
                      (run next-pc))
                     ((string=? op "fmv.x.d")
-                     (set-gp! (car ops) (flonum->ieee64-bits (get-fp (cadr ops))))
+                     (set-gp! (car ops) (rv-flonum->ieee64-bits (get-fp (cadr ops))))
                      (run next-pc))
                     ((string=? op "fmv.x.w")      ; [cco] 32 bits, sign-extended
-                     (set-gp! (car ops) (s32 (flonum->ieee32-bits (get-fp (cadr ops)))))
+                     (set-gp! (car ops) (s32 (rv-flonum->ieee32-bits (get-fp (cadr ops)))))
                      (run next-pc))
 
                     ;; Memory Loads
@@ -580,8 +622,8 @@
                          ((string=? op "sh")  (sim-store! mem addr (get-gp rs) 2))
                          ((string=? op "sw")  (sim-store! mem addr (get-gp rs) 4))
                          ((string=? op "sd")  (sim-store! mem addr (get-gp rs) 8))
-                         ((string=? op "fsw") (sim-store! mem addr (flonum->ieee32-bits (get-fp rs)) 4))  ; [cco]
-                         ((string=? op "fsd") (sim-store! mem addr (flonum->ieee64-bits (get-fp rs)) 8)))
+                         ((string=? op "fsw") (sim-store! mem addr (rv-flonum->ieee32-bits (get-fp rs)) 4))  ; [cco]
+                         ((string=? op "fsd") (sim-store! mem addr (rv-flonum->ieee64-bits (get-fp rs)) 8)))
                        (run next-pc)))
 
                     ;; Immediate ALU
@@ -841,7 +883,7 @@
                              (cond
                                ((or (string=? sym "malloc") (string=? sym "stdlib_malloc"))
                                 (let* ((sz (max 8 (u64 a0)))
-                                       (aligned-sz (align-up sz 16))
+                                       (aligned-sz (rv-align-up sz 16))
                                        (ptr (+ heap-ptr 16)))
                                   (sim-store! mem (+ heap-ptr 8) sz 8)
                                   (set! heap-ptr (+ ptr aligned-sz))
@@ -851,7 +893,7 @@
                                ((or (string=? sym "calloc") (string=? sym "stdlib_calloc"))
                                 (let* ((tot (* (u64 a0) (u64 a1)))
                                        (sz (max 8 tot))
-                                       (aligned-sz (align-up sz 16))
+                                       (aligned-sz (rv-align-up sz 16))
                                        (ptr (+ heap-ptr 16)))
                                   (sim-store! mem (+ heap-ptr 8) tot 8)
                                   (let zlp ((i 0))
@@ -865,7 +907,7 @@
                                ((or (string=? sym "realloc") (string=? sym "stdlib_realloc"))
                                 (let* ((old-ptr a0)
                                        (new-sz (max 8 (u64 a1)))
-                                       (aligned-sz (align-up new-sz 16))
+                                       (aligned-sz (rv-align-up new-sz 16))
                                        (new-ptr (+ heap-ptr 16)))
                                   (sim-store! mem (+ heap-ptr 8) new-sz 8)
                                   (set! heap-ptr (+ new-ptr aligned-sz))
@@ -1277,9 +1319,9 @@
                                        (cx (- (* ay bz) (* az by)))
                                        (cy (- (* az bx) (* ax bz)))
                                        (cz (- (* ax by) (* ay bx))))
-                                  (sim-store! mem rp        (flonum->ieee64-bits cx) 8)
-                                  (sim-store! mem (+ rp 8)  (flonum->ieee64-bits cy) 8)
-                                  (sim-store! mem (+ rp 16) (flonum->ieee64-bits cz) 8)
+                                  (sim-store! mem rp        (rv-flonum->ieee64-bits cx) 8)
+                                  (sim-store! mem (+ rp 8)  (rv-flonum->ieee64-bits cy) 8)
+                                  (sim-store! mem (+ rp 16) (rv-flonum->ieee64-bits cz) 8)
                                   (run next-pc)))
 
                                ((string=? sym "math_vec_norm")
