@@ -24,6 +24,7 @@ marv -t TARGDES [-c] [OPTION]... FILE...
 | `-I` | `--include-dir=DIR` | `DIR` | Add `DIR` to the project/local `.mvh` header lookup path (default: `("./")`). |
 | `-v` | `--verbose` | *(none)* | Print each compilation step line and the linker command line to `stderr` before executing. |
 | `-n` | `--dry-run` | *(none)* | Print the target command and cleanup commands instead of executing them. MARV still generates the temporary target files. |
+| `-M` | `--makefile-dir=DIR` | `DIR` | Generate a self-contained build directory with a makefile instead of running the backend compiler. |
 | `-h` | `--help` | *(none)* | Display command-line usage and options. |
 | | `--split-funcs=N` | `N` | In link mode on a `cc` target, cut the generated C into pieces of at most `N` function definitions, each compiled as its own translation unit (default `300`; `0` does not cut). One huge translation unit is what makes a host C compiler's memory grow on a large module. Ignored in `-c` mode, which always writes one file. |
 
@@ -69,6 +70,42 @@ In compile-and-link mode, `marv`:
 2. Inspects the `(include system $...)` dependencies of the input modules, locates the corresponding system `.mvh` headers in the `-L` lookup directories (default `("lib/" "<PREFIX>/lib")` or `("lib/" "libs/")`), and pairs each with its `.c` adapter file in the same directory (`lib/<module>.c`).
 3. Invokes the target compiler/linker defined in the `.mvt` file with `-o FILE`, the module object files, and the required system `.c` adapter files.
 4. Deletes the temporary object files created during the run when the target command succeeds or fails. With `-n`, cleanup is printed instead of performed.
+
+### 3. Makefile Directory (`-M DIR`)
+
+In link mode, `-M DIR` (or `--makefile-dir=DIR`) generates the target files,
+copies the required MARV adapters and other input files, and writes `Makefile`
+in `DIR` instead of invoking the target compiler. MARV creates missing directory
+components and does not use the temporary directory. The basename of `-o FILE`
+names the executable **inside** `DIR`; any preceding directory is ignored.
+For the `cl` target, MARV writes `nmakefile` instead and adds `.exe` if the
+output name has no extension.
+
+```sh
+marv -T target -t cc -O2 -M build-marv -o app examples/queens.mvs
+make -C build-marv                 # build the executable
+make -C build-marv clean           # remove the executable and build products
+make -C build-marv cleanall        # also remove MARV's copies and Makefile
+```
+
+On Windows with MSVC, use `nmake /f nmakefile` inside `DIR`, followed by
+`nmake /f nmakefile clean` or `nmake /f nmakefile cleanall`. `cleanall` removes
+only the files recorded by MARV, not unrelated files in the directory. MARV
+refuses to overwrite an existing `Makefile` or `nmakefile` of the chosen kind;
+run its `cleanall` first or choose a different directory. `-M` cannot be
+combined with `-c`, `-n`, or diagnostic modes, and requires `-o`.
+
+C inputs and adapters are copied along with recursively discovered literal
+quoted `#include` dependencies; include names in the copies are rewritten to
+local filenames. Toolchain-provided headers and libraries remain external.
+Custom target commands and unusual dependencies—such as macro-computed C
+includes, user headers written with angle brackets, or paths embedded in custom
+compiler flags—are handled on a best-effort basis and may need manual changes.
+User-supplied shared libraries may also need runtime loader configuration to
+find their copies in `DIR`. An unresolved quoted include or nonliteral include
+produces a warning. The generated
+makefile uses the selected target command and `-O` substitution; it does not
+invoke MARV when building.
 
 ### Backend optimization level
 

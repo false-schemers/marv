@@ -23,6 +23,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
+#ifndef __WCPL__
+#ifdef _WIN32
+#include <direct.h>
+#endif
+#endif
 #include "m.h"
 #include "r.h"
 #include "v.h"
@@ -586,6 +593,7 @@ static void mvusage(FILE *fp)
   fprintf(fp, "  -I, --include-dir=DIR  add DIR to the local .mvh lookup path\n");
   fprintf(fp, "  -v, --verbose          print each step before running it\n");
   fprintf(fp, "  -n, --dry-run          print the commands instead of running them\n");
+  fprintf(fp, "  -M, --makefile-dir=DIR package the build and makefile in DIR\n");
   fprintf(fp, "  -h, --help             print this\n");
   fprintf(fp, "      --count            report what syntax the inputs contain\n");
   fprintf(fp, "      --write            read every form and write it back out\n");
@@ -621,23 +629,53 @@ static sym_t with_ext(const char *path, const char *ext)
   return r;
 }
 
+/* stat also notices an existing file which is not readable by this process. */
+static bool make_path_exists(const char *path)
+{
+  struct stat st;
+  return stat(path, &st) == 0;
+}
+
 static int g_tempno;
+static const char *g_make_dir;    /* -M: keep every generated file here */
+static const char *g_make_output;
+static bool g_make_cl;
 
 static sym_t temp_obj(const char *ext)
 {
   cbuf_t cb;
   sym_t r;
   const char *tdir;
-  tdir = getenv("TMPDIR");
-  if (tdir == NULL || tdir[0] == 0) tdir = getenv("TMP");
-  if (tdir == NULL || tdir[0] == 0) tdir = getenv("TEMP");
-  if (tdir == NULL || tdir[0] == 0) tdir = host_windows() ? "." : "/tmp";
+  tdir = g_make_dir;
+  if (tdir == NULL) {
+    tdir = getenv("TMPDIR");
+    if (tdir == NULL || tdir[0] == 0) tdir = getenv("TMP");
+    if (tdir == NULL || tdir[0] == 0) tdir = getenv("TEMP");
+    if (tdir == NULL || tdir[0] == 0) tdir = host_windows() ? "." : "/tmp";
+  }
   cbinit(&cb);
   for (;;) {
     cbclear(&cb);
     cbsetf(&cb, "%s/marv_%ld_%d%s", tdir, marv_pid(), g_tempno, ext);
     g_tempno += 1;
-    if (!file_readable((char *)cbdata(&cb))) break;
+    if (g_make_dir != NULL && g_make_output != NULL) {
+      const char *base;
+      base = strrchr((const char *)cbdata(&cb), '/');
+      if (base != NULL && streql(base + 1, g_make_output)) continue;
+    }
+    if (g_make_dir != NULL ? make_path_exists((char *)cbdata(&cb))
+                           : file_readable((char *)cbdata(&cb))) continue;
+    if (g_make_dir != NULL && g_make_cl &&
+        (streql(ext, ".c") || streql(ext, ".C") || streql(ext, ".cc") || streql(ext, ".cpp"))) {
+      cbuf_t obj;
+      bool taken;
+      cbinit(&obj);
+      cbsetf(&obj, "%s/marv_%ld_%d.obj", tdir, marv_pid(), g_tempno - 1);
+      taken = make_path_exists((const char *)cbdata(&obj));
+      cbfini(&obj);
+      if (taken) continue;
+    }
+    break;
   }
   r = intern((const char *)cbdata(&cb));
   cbfini(&cb);
@@ -1003,7 +1041,10 @@ static size_t split_file(const char *path, const char *objext, buf_t *pnames,
     }
     fclose(fp);
     /* a piece with no definition of its own is a compile for nothing */
-    if (piece > 0 && wrote == 0) { delfile(symname(nm)); continue; }
+    if (piece > 0 && wrote == 0) {
+      if (g_make_dir != NULL) remove(symname(nm)); else delfile(symname(nm));
+      continue;
+    }
     *(sym_t *)bufnewbk(pnames) = nm;
     if (piece > 0) *(sym_t *)bufnewbk(ptemps) = nm;
   }
@@ -1019,12 +1060,12 @@ static bool bad_command_path(cbuf_t *cmd, cbuf_t *src)
   return false;
 }
 
-static bool run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
+static bool link_command(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs,
+                         cbuf_t *pcmd)
 {
   cbuf_t src;
   cbuf_t cmd;
   size_t i;
-  int rc;
   cbinit(&src);
   cbinit(&cmd);
   for (i = 0; i < buflen(pobjs); ++i) {
@@ -1054,16 +1095,410 @@ static bool run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
     cbputs((const char *)cbdata(&src), &cmd);
   }
   cbputc(0, &cmd);
-  if (g_verbose != 0) fprintf(stderr, "%s\n", (const char *)cbdata(&cmd));
-  rc = runcmd((const char *)cbdata(&cmd));
-  if (rc != 0) {
-    fprintf(stderr, "marv: the target linker failed (%d)\n", rc);
-    cbfini(&cmd); cbfini(&src);
-    return false;
-  }
+  cbclear(pcmd);
+  cbputs((const char *)cbdata(&cmd), pcmd);
+  cbputc(0, pcmd);
   cbfini(&cmd);
   cbfini(&src);
   return true;
+}
+
+static bool run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)
+{
+  cbuf_t cmd;
+  int rc;
+  cbinit(&cmd);
+  if (!link_command(pt, out, pobjs, pcs, &cmd)) { cbfini(&cmd); return false; }
+  if (g_verbose != 0) fprintf(stderr, "%s\n", (const char *)cbdata(&cmd));
+  rc = runcmd((const char *)cbdata(&cmd));
+  cbfini(&cmd);
+  if (rc != 0) {
+    fprintf(stderr, "marv: the target linker failed (%d)\n", rc);
+    return false;
+  }
+  return true;
+}
+
+/* A self-contained makefile build. Only the target tools and their standard
+ * libraries remain external. Quoted C includes are copied and rewritten to
+ * unique local names; custom shell commands and macro includes are best effort. */
+typedef struct make_copy {
+  sym_t source;
+  sym_t local;
+} make_copy_t;
+
+typedef struct make_ctx {
+  buf_t copies;              /* make_copy_t, including recursively copied headers */
+  buf_t files;               /* sym_t: names to remove in cleanall */
+} make_ctx_t;
+
+static const char *make_base(const char *path)
+{
+  const char *p, *base;
+  base = path;
+  for (p = path; *p != 0; ++p)
+    if (*p == '/' || *p == '\\') base = p + 1;
+  return base;
+}
+
+#ifndef __WCPL__
+#ifdef _WIN32
+static bool make_is_directory(const struct stat *st) { return (st->st_mode & _S_IFMT) == _S_IFDIR; }
+static int make_mkdir(const char *path) { return _mkdir(path); }
+#else
+static bool make_is_directory(const struct stat *st) { return S_ISDIR(st->st_mode); }
+static int make_mkdir(const char *path) { return mkdir(path, 0777); }
+#endif
+#else
+static bool make_is_directory(const struct stat *st) { return S_ISDIR(st->st_mode); }
+static int make_mkdir(const char *path) { return mkdir(path, 0777); }
+#endif
+
+static bool make_dir_one(const char *path)
+{
+  struct stat st;
+  if (stat(path, &st) == 0) {
+    if (make_is_directory(&st)) return true;
+    fprintf(stderr, "marv: not a directory: %s\n", path);
+    return false;
+  }
+  if (make_mkdir(path) == 0) return true;
+  fprintf(stderr, "marv: cannot create directory %s: %s\n", path, strerror(errno));
+  return false;
+}
+
+/* Create missing path components without invoking a shell or using TMPDIR. */
+static bool make_dirs(const char *path)
+{
+  cbuf_t part;
+  size_t i;
+  bool ok;
+  cbinit(&part);
+  ok = true;
+  for (i = 0; path[i] != 0; ++i) {
+    if ((path[i] == '/' || path[i] == '\\') && i > 0
+        && !(i == 2 && path[1] == ':') && cblen(&part) > 0) {
+      cbputc(0, &part);
+      if (!make_dir_one((const char *)cbdata(&part))) { ok = false; break; }
+      ((char *)cbdata(&part))[cblen(&part) - 1] = path[i];
+    } else cbputc(path[i], &part);
+  }
+  if (ok && cblen(&part) > 0) {
+    cbputc(0, &part);
+    ok = make_dir_one((const char *)cbdata(&part));
+  }
+  cbfini(&part);
+  return ok;
+}
+
+static void make_record(make_ctx_t *ctx, const char *path)
+{
+  sym_t name;
+  size_t i;
+  name = intern(make_base(path));
+  for (i = 0; i < buflen(&ctx->files); ++i)
+    if (*(sym_t *)bufref(&ctx->files, i) == name) return;
+  *(sym_t *)bufnewbk(&ctx->files) = name;
+}
+
+/* Only ordinary filename extensions are preserved in the local copy. */
+static const char *make_ext(const char *path)
+{
+  const char *base, *ext, *p;
+  base = make_base(path);
+  ext = strrchr(base, '.');
+  if (ext == NULL) return "";
+  for (p = ext + 1; *p != 0; ++p)
+    if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+          (*p >= '0' && *p <= '9') || *p == '_')) return "";
+  return ext;
+}
+
+static bool make_text_input(const char *path)
+{
+  const char *ext;
+  ext = make_ext(path);
+  return streql(ext, ".c") || streql(ext, ".h") || streql(ext, ".C") ||
+         streql(ext, ".cc") || streql(ext, ".cpp") || streql(ext, ".hpp");
+}
+
+/* Find a quoted C include in the source's directory, then MARV's -I paths. */
+static bool make_find_include(const char *source, const char *name, cbuf_t *path)
+{
+  cbuf_t dir;
+  bool absolute;
+  absolute = name[0] == '/' || name[0] == '\\' || (name[0] && name[1] == ':');
+  cbclear(path);
+  if (absolute) cbputs(name, path);
+  else {
+    cbinit(&dir);
+    path_dir(source, &dir);
+    cbput(cbdata(&dir), cblen(&dir), path);
+    cbputs(name, path);
+    cbfini(&dir);
+  }
+  cbputc(0, path);
+  if (file_readable((const char *)cbdata(path))) return true;
+  if (absolute) return false;
+  return find_in_dirs(&g_idirs, NULL, name, "", path);
+}
+
+/* Copy one external input to DIR. Quoted includes in C and headers are
+ * recursively resolved and rewritten to the copied local header name. */
+static sym_t make_copy_file(make_ctx_t *ctx, const char *source, bool text)
+{
+  size_t i;
+  sym_t srcsym, dest, local;
+  FILE *in, *out;
+  make_copy_t *entry;
+  cbuf_t line, candidate;
+  int ch;
+  srcsym = intern(source);
+  for (i = 0; i < buflen(&ctx->copies); ++i) {
+    entry = (make_copy_t *)bufref(&ctx->copies, i);
+    if (entry->source == srcsym) return entry->local;
+  }
+  if (buflen(&ctx->copies) >= 1024) {
+    fprintf(stderr, "marv: too many bundled files (possibly a recursive include): %s\n", source);
+    return 0;
+  }
+  in = fopen(source, "rb");
+  if (in == NULL) { fprintf(stderr, "marv: cannot read build input %s\n", source); return 0; }
+  dest = temp_obj(make_ext(source));
+  local = intern(make_base(symname(dest)));
+  out = fopen(symname(dest), text ? "w" : "wb");
+  if (out == NULL) {
+    fprintf(stderr, "marv: cannot write build input %s\n", symname(dest));
+    fclose(in); return 0;
+  }
+  make_record(ctx, symname(dest));
+  entry = (make_copy_t *)bufnewbk(&ctx->copies);
+  entry->source = srcsym;
+  entry->local = local;
+  cbinit(&line);
+  cbinit(&candidate);
+  if (!text) {
+    while ((ch = fgetc(in)) != EOF) if (fputc(ch, out) == EOF) break;
+  } else {
+    while (fgetlb(&line, in) != NULL) {
+      const char *p, *q, *end;
+      p = (const char *)cbdata(&line);
+      while (*p == ' ' || *p == '\t') ++p;
+      if (*p == '#') {
+        ++p;
+        while (*p == ' ' || *p == '\t') ++p;
+        if (strncmp(p, "include", 7) == 0 && (p[7] == ' ' || p[7] == '\t' || p[7] == '"' || p[7] == '<')) {
+          p += 7;
+          while (*p == ' ' || *p == '\t') ++p;
+          if (*p == '"' && (end = strchr(p + 1, '"')) != NULL) {
+            cbuf_t name;
+            sym_t inc;
+            cbinit(&name);
+            cbput(p + 1, (size_t)(end - p - 1), &name);
+            cbputc(0, &name);
+            if (make_find_include(source, (const char *)cbdata(&name), &candidate)) {
+              inc = make_copy_file(ctx, (const char *)cbdata(&candidate), true);
+              if (inc == 0) { cbfini(&name); cbfini(&line); cbfini(&candidate); fclose(in); fclose(out); return 0; }
+              q = (const char *)cbdata(&line);
+              fwrite(q, 1, (size_t)(p + 1 - q), out);
+              fputs(symname(inc), out);
+              fputs(end, out);
+              fputc('\n', out);
+              cbfini(&name);
+              continue;
+            }
+            fprintf(stderr, "marv: warning: unresolved quoted include %s in %s; build may need manual adjustment\n", (const char *)cbdata(&name), source);
+            cbfini(&name);
+          } else if (*p != '<') {
+            fprintf(stderr, "marv: warning: nonliteral include in %s; build may need manual adjustment\n", source);
+          }
+        }
+      }
+      fputs((const char *)cbdata(&line), out);
+      fputc('\n', out);
+    }
+  }
+  cbfini(&line); cbfini(&candidate);
+  if (ferror(in) || ferror(out)) {
+    fprintf(stderr, "marv: error copying %s\n", source);
+    fclose(in); fclose(out); return 0;
+  }
+  fclose(in);
+  if (fclose(out) != 0) { fprintf(stderr, "marv: error writing %s\n", symname(dest)); return 0; }
+  return local;
+}
+
+static bool make_is_cl(tgt_t *pt)
+{
+  const char *cc;
+  cc = make_base(symname(pt->cc));
+  return streql(cc, "cl") || streql(cc, "cl.exe") || streql(cc, "CL") || streql(cc, "CL.EXE");
+}
+
+static void make_target_name(FILE *fp, const char *name, bool nmake)
+{
+  const char *p;
+  if (nmake) { fprintf(fp, "\"%s\"", name); return; }
+  for (p = name; *p; ++p) {
+    if (*p == ' ' || *p == ':' || *p == '\\') fputc('\\', fp);
+    fputc(*p, fp);
+  }
+}
+
+static bool make_delete_line(FILE *fp, const char *name, bool nmake)
+{
+  cbuf_t arg;
+  cbinit(&arg);
+  if (!shell_path(&arg, name, true, nmake)) { cbfini(&arg); return false; }
+  cbputc(0, &arg);
+  if (nmake) fprintf(fp, "\t@if exist %s del /q %s\n", cbdata(&arg), cbdata(&arg));
+  else fprintf(fp, "\trm -f %s\n", cbdata(&arg));
+  cbfini(&arg);
+  return true;
+}
+
+static bool make_package(tgt_t *pt, const char *dir, const char *outfile,
+                         int ninputs, char **inputs)
+{
+  make_ctx_t ctx;
+  buf_t objs, adapters, relobjs, reladapters, temps;
+  cbuf_t path, cmd, outname;
+  const char *mkname, *base;
+  sym_t output;
+  bool cl, ok, made_makefile;
+  size_t i;
+  int k;
+  FILE *fp;
+  made_makefile = false;
+  cl = make_is_cl(pt);
+  mkname = cl ? "nmakefile" : "Makefile";
+  base = make_base(outfile);
+  if (base[0] == 0 || streql(base, ".") || streql(base, "..") ||
+      streql(base, mkname) || streql(base, "all") || streql(base, "clean") || streql(base, "cleanall")) {
+    fprintf(stderr, "marv: invalid executable name for -M: %s\n", outfile);
+    return false;
+  }
+  if (!make_dirs(dir)) return false;
+  cbinit(&path); cbinit(&cmd); cbinit(&outname);
+  cbsetf(&path, "%s/%s", dir, mkname);
+  if (make_path_exists((const char *)cbdata(&path))) {
+    fprintf(stderr, "marv: %s already exists; run cleanall or choose another directory\n", cbdata(&path));
+    cbfini(&path); cbfini(&cmd); cbfini(&outname); return false;
+  }
+  cbputs(base, &outname);
+  if (cl && strchr(base, '.') == NULL) cbputs(".exe", &outname);
+  cbputc(0, &outname);
+  output = intern((const char *)cbdata(&outname));
+  /* Validate command spelling before writing any generated files. */
+  cbclear(&cmd);
+  if (!shell_path(&cmd, symname(output), false, false)) {
+    cbfini(&path); cbfini(&cmd); cbfini(&outname); return false;
+  }
+  g_make_dir = dir;
+  g_make_output = symname(output);
+  g_make_cl = cl;
+  bufinit(&ctx.copies, sizeof(make_copy_t));
+  bufinit(&ctx.files, sizeof(sym_t));
+  bufinit(&objs, sizeof(sym_t)); bufinit(&adapters, sizeof(sym_t));
+  bufinit(&relobjs, sizeof(sym_t)); bufinit(&reladapters, sizeof(sym_t));
+  bufinit(&temps, sizeof(sym_t));
+  ok = true;
+  for (k = 0; k < ninputs && ok; ++k) {
+    if (has_suffix(inputs[k], ".mvs")) {
+      sym_t dest;
+      dest = temp_obj(symname(pt->objext));
+      compile_one(pt, inputs[k], symname(dest));
+      *(sym_t *)bufnewbk(&temps) = dest;
+      if (pt->type == TT_CC && g_split > 0)
+        split_file(symname(dest), symname(pt->objext), &objs, &temps);
+      else *(sym_t *)bufnewbk(&objs) = dest;
+      gather_adapters(&adapters);
+    } else {
+      sym_t local;
+      adapters_of_object(inputs[k], &adapters);
+      local = make_copy_file(&ctx, inputs[k], make_text_input(inputs[k]));
+      if (local == 0) ok = false;
+      else *(sym_t *)bufnewbk(&objs) = local;
+    }
+  }
+  for (i = 0; i < buflen(&temps); ++i)
+    make_record(&ctx, symname(*(sym_t *)bufref(&temps, i)));
+  for (i = 0; i < buflen(&objs); ++i)
+    *(sym_t *)bufnewbk(&relobjs) = intern(make_base(symname(*(sym_t *)bufref(&objs, i))));
+  for (i = 0; i < buflen(&adapters) && ok; ++i) {
+    const char *source;
+    sym_t local;
+    source = symname(*(sym_t *)bufref(&adapters, i));
+    local = make_copy_file(&ctx, source, true);
+    if (local == 0) ok = false;
+    else *(sym_t *)bufnewbk(&reladapters) = local;
+  }
+  if (ok) ok = link_command(pt, symname(output), &relobjs, &reladapters, &cmd);
+  if (ok) {
+    cbsetf(&path, "%s/%s", dir, mkname);
+    fp = fopen((const char *)cbdata(&path), "w");
+    if (fp == NULL) { fprintf(stderr, "marv: cannot write %s\n", cbdata(&path)); ok = false; }
+    else {
+      made_makefile = true;
+      if (!cl) fputs(".PHONY: all clean cleanall\n\n", fp);
+      fputs("all: ", fp); make_target_name(fp, symname(output), cl); fputs("\n\n", fp);
+      make_target_name(fp, symname(output), cl); fputs(":", fp);
+      for (i = 0; i < buflen(&ctx.files); ++i) {
+        fputc(' ', fp); make_target_name(fp, symname(*(sym_t *)bufref(&ctx.files, i)), cl);
+      }
+      {
+        const char *p;
+        fputs("\n\t", fp);
+        for (p = (const char *)cbdata(&cmd); *p != 0; ++p) {
+          if (*p == '$') fputc('$', fp);
+          fputc(*p, fp);
+        }
+        fputs("\n\nclean:\n", fp);
+      }
+      if (!make_delete_line(fp, symname(output), cl)) ok = false;
+      if (cl) {
+        /* cl leaves one .obj for every C translation unit in the directory. */
+        for (i = 0; i < buflen(&relobjs) + buflen(&reladapters); ++i) {
+          const char *name, *ext;
+          sym_t obj;
+          if (i < buflen(&relobjs)) obj = *(sym_t *)bufref(&relobjs, i);
+          else obj = *(sym_t *)bufref(&reladapters, i - buflen(&relobjs));
+          name = symname(obj); ext = make_ext(name);
+          if (streql(ext, ".c") || streql(ext, ".C") || streql(ext, ".cpp") || streql(ext, ".cc")) {
+            cbuf_t objname;
+            cbinit(&objname); cbput(name, (size_t)(ext - name), &objname);
+            cbputs(".obj", &objname); cbputc(0, &objname);
+            if (!make_delete_line(fp, (const char *)cbdata(&objname), true)) ok = false;
+            cbfini(&objname);
+          }
+        }
+      }
+      fputs("\ncleanall: clean\n", fp);
+      for (i = 0; i < buflen(&ctx.files); ++i)
+        if (!make_delete_line(fp, symname(*(sym_t *)bufref(&ctx.files, i)), cl)) ok = false;
+      if (!make_delete_line(fp, mkname, cl)) ok = false;
+      if (ferror(fp)) ok = false;
+      if (fclose(fp) != 0) ok = false;
+      if (!ok) fprintf(stderr, "marv: error writing %s\n", cbdata(&path));
+    }
+  }
+  if (!ok) {
+    for (i = 0; i < buflen(&ctx.files); ++i) {
+      cbsetf(&path, "%s/%s", dir, symname(*(sym_t *)bufref(&ctx.files, i)));
+      remove((const char *)cbdata(&path));
+    }
+    if (made_makefile) {
+      cbsetf(&path, "%s/%s", dir, mkname);
+      remove((const char *)cbdata(&path));
+    }
+  }
+  buffini(&ctx.copies); buffini(&ctx.files); buffini(&objs); buffini(&adapters);
+  buffini(&relobjs); buffini(&reladapters); buffini(&temps);
+  cbfini(&path); cbfini(&cmd); cbfini(&outname);
+  g_make_dir = NULL;
+  g_make_output = NULL;
+  g_make_cl = false;
+  return ok;
 }
 
 int main(int argc, char **argv)
@@ -1071,6 +1506,7 @@ int main(int argc, char **argv)
   int i, dflag;
   const char *targdes;
   const char *outfile;
+  const char *make_dir;
   bool conly, linked;
   tgt_t tgt;
   cbuf_t mvtpath;
@@ -1081,7 +1517,7 @@ int main(int argc, char **argv)
   setprogname("marv");
   init_instrs();
   dirs_init();
-  targdes = NULL; outfile = NULL; conly = false; dflag = 0;
+  targdes = NULL; outfile = NULL; make_dir = NULL; conly = false; dflag = 0;
 
   for (i = 1; i < argc; ++i) {
     const char *s;
@@ -1113,6 +1549,7 @@ int main(int argc, char **argv)
         else if (n == 12 && strncmp(s, "--system-dir", 12) == 0) opt = 'L';
         else if (n == 13 && strncmp(s, "--include-dir", 13) == 0) opt = 'I';
         else if (n == 13 && strncmp(s, "--split-funcs", 13) == 0) opt = 'S';
+        else if (n == 14 && strncmp(s, "--makefile-dir", 14) == 0) opt = 'M';
         if (opt != 0) {
           if (eq != NULL) val = eq + 1;
           else if (i + 1 < argc) { i += 1; val = argv[i]; }
@@ -1131,7 +1568,7 @@ int main(int argc, char **argv)
           if (c2 == 'c') { conly = true; continue; }
           if (c2 == 'v') { g_verbose = 1; continue; }
           if (c2 == 'n') { g_dryrun = 1; continue; }
-          if (c2 == 't' || c2 == 'T' || c2 == 'o' || c2 == 'L' || c2 == 'I' || c2 == 'O') {
+          if (c2 == 't' || c2 == 'T' || c2 == 'o' || c2 == 'L' || c2 == 'I' || c2 == 'O' || c2 == 'M') {
             opt = c2;
             if (s[k + 1] != '\0') val = s + k + 1;      /* -tcc */
             else if (i + 1 < argc) { i += 1; val = argv[i]; }   /* -t cc */
@@ -1158,6 +1595,7 @@ int main(int argc, char **argv)
       }
       if (opt == 't') targdes = val;
       else if (opt == 'o') outfile = val;
+      else if (opt == 'M') make_dir = val;
       else if (opt == 'O') {
         if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
           fprintf(stderr, "marv: -O takes 0, 1, 2, or 3, not %s\n", val);
@@ -1181,6 +1619,14 @@ int main(int argc, char **argv)
     }
   }
 
+  if (make_dir != NULL && (conly || g_dryrun || dflag != 0)) {
+    fprintf(stderr, "marv: -M cannot be combined with -c, -n, or a diagnostic mode\n");
+    return 2;
+  }
+  if (make_dir != NULL && make_dir[0] == 0) {
+    fprintf(stderr, "marv: -M requires a nonempty directory\n");
+    return 2;
+  }
   if (dflag != 0) {                 /* the diagnostic modes */
     if (dflag == 4 || dflag == 5) {
       for (; i < argc; ++i) flatten_file(argv[i], dflag == 5);
@@ -1261,6 +1707,11 @@ int main(int argc, char **argv)
   if (outfile == NULL) {
     fprintf(stderr, "marv: -o FILE is required when -c is not specified\n");
     return 1;
+  }
+  if (make_dir != NULL) {
+    linked = make_package(&tgt, make_dir, outfile, argc - i, argv + i);
+    dirs_fini();
+    return linked ? 0 : 1;
   }
   bufinit(&objs, sizeof(sym_t));
   bufinit(&temps, sizeof(sym_t));
