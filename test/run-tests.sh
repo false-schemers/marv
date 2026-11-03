@@ -281,3 +281,18 @@ for local_decl in '(local)' '(local $x)' '(local $x unknown)' '(local $x 7 ptr)'
   fi
 done
 echo "  [PASS] grouped locals, macro typing, equivalence and diagnostics!"
+
+
+echo ""
+echo "12. Testing makefile-directory packaging..."
+CC="$CC" WCPL_BIN="$WCPL_BIN" bash test/makefile.sh "$MARV_BIN"
+
+
+echo ""
+echo "13. Testing R7RS character literals..."
+SKINT_BIN="$SKINT_BIN" SKINT_LIB="$SKINT_LIB" WCPL_BIN="$WCPL_BIN" WCPL_HOME="$WCPL_HOME" \
+  bash test/characters.sh "$MARV_BIN"
+
+echo ""
+echo "14. Testing platform default targets..."
+CC="$CC" bash test/default-target.sh "$MARV_BIN"

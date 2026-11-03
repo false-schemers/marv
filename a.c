@@ -1,6 +1,6 @@
 /* a.c (marv driver) -- [cco]
  *
- *   marv -t TARGDES [-c] [-o FILE] [-T DIR] [-L DIR] [-I DIR] [-v] FILE...
+ *   marv [-t TARGDES] [-c] [-o FILE] [-T DIR] [-L DIR] [-I DIR] [-v] FILE...
  *
  * The target designation names a .mvt description, which gives the object
  * extension and the command that links.  With -c one .mvs file becomes one
@@ -580,8 +580,8 @@ static const char *g_targdes = "";
 
 static void mvusage(FILE *fp)
 {
-  fprintf(fp, "usage: marv -t TARGDES [-c] [OPTION]... FILE...\n");
-  fprintf(fp, "  -t, --target=TARGDES   target description to compile for (required)\n");
+  fprintf(fp, "usage: marv [-t TARGDES] [-c] [OPTION]... FILE...\n");
+  fprintf(fp, "  -t, --target=TARGDES   target description (default: cl on Windows, cc elsewhere)\n");
   fprintf(fp, "  -T, --target-dir=DIR   add DIR to the .mvt lookup path\n");
   fprintf(fp, "  -c, --compile          compile one .mvs file, do not link\n");
   fprintf(fp, "      --split-funcs=N    in link mode on a cc target, cut the\n");
@@ -1662,11 +1662,7 @@ int main(int argc, char **argv)
     return 0;
   }
 
-  if (targdes == NULL) {
-    fprintf(stderr, "marv: missing required -t TARGDES option\n\n");
-    mvusage(stderr);
-    return 1;
-  }
+  if (targdes == NULL) targdes = host_windows() ? "cl" : "cc";
   if (i >= argc) {
     fprintf(stderr, "marv: no input files specified\n\n");
     mvusage(stderr);

@@ -155,10 +155,10 @@ Open a **Developer Command Prompt for Visual Studio** (x64 or x86 Native Tools C
 cl /nologo /O2 /Fe:marv.exe m.c r.c v.c a.c
 ```
 
-To compile and link a MARV program into a native Windows `.exe` using the included `target/cl.mvt` target description:
+To compile and link a MARV program into a native Windows `.exe` using the included `target/cl.mvt` target description (`cl` is the default on Windows; `cc` is the default elsewhere):
 
 ```bat
-marv.exe -t cl -o queens.exe examples\queens.mvs
+marv.exe -o queens.exe examples\queens.mvs
 queens.exe
 ```
 

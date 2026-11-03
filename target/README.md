@@ -2,7 +2,7 @@
 
 A `.mvt` target description file is a `(marv-target ...)` S-expression specifying the target backend type (`wcpl`, `cc`, or `rv64g`), object file extension, and the command parameters used to invoke the target compiler and linker.
 
-`marv` requires a `-t TARGDES` option on every invocation and resolves `TARGDES` first as an explicit path (`<TARGDES>.mvt`) and then by searching the target lookup directories (`-T DIR`, defaulting to `("target/" "<PREFIX>/target")` when compiled with `-D PREFIX=...`, or `("target/" "targets/")` otherwise) for `<DIR>/<TARGDES>.mvt`.
+`marv` defaults to the `cl` target on Windows and `cc` elsewhere; use `-t TARGDES` to select another target. It resolves the selected target first as an explicit `.mvt` path and then by searching the target lookup directories (`-T DIR`, defaulting to `("target/" "<PREFIX>/target")` when compiled with `-D PREFIX=...`, or `("target/" "targets/")` otherwise) for `<DIR>/<TARGDES>.mvt`.
 
 ---
 

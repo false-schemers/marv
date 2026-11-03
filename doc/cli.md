@@ -8,14 +8,14 @@ The target is named by a target description file (`.mvt`); see
 ## Synopsis
 
 ```sh
-marv -t TARGDES [-c] [OPTION]... FILE...
+marv [-t TARGDES] [-c] [OPTION]... FILE...
 ```
 
 ## Options
 
 | Option | Long Option | Argument | Description |
 |---|---|---|---|
-| `-t` | `--target=TARGDES` | `TARGDES` | **Required.** Target designation name or path mapped to a `.mvt` target description file. |
+| `-t` | `--target=TARGDES` | `TARGDES` | Target designation name or path mapped to a `.mvt` file (default: `cl` on Windows, `cc` elsewhere). |
 | `-T` | `--target-dir=DIR` | `DIR` | Add `DIR` to the `.mvt` target description lookup path (default: `("target/" "<PREFIX>/target")` or `("target/" "targets/")`). |
 | `-c` | `--compile` | *(none)* | Compile one `.mvs` file into a target object file without linking. |
 | `-o` | `--output=FILE` | `FILE` | Output pathname (optional override in `-c` mode; required executable name when `-c` is omitted). |
@@ -31,6 +31,9 @@ marv -t TARGDES [-c] [OPTION]... FILE...
 Diagnostic modes `--count`, `--write`, `--stream`, `--3ac`, and `--3ac-write` inspect source input instead of compiling it; see `marv --help`.
 
 Options follow standard POSIX syntax: short flags may be clustered (e.g. `-vc`), and option arguments may be passed either separately (`-t cc`, `-o app`) or attached (`-tcc`, `--target=cc`, `--output=app`).
+
+The WCPL/WASI build defaults to `cc`: WASI does not expose whether its host is
+Windows. Use `-t cl` explicitly when a WASI-hosted compiler should target MSVC.
 
 ---
 

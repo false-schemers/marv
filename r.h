@@ -6,7 +6,8 @@
  *
  * Supported: line comments (;), lists, symbols, strings with \n \t \r \\ \" and
  * \xHH...; escapes, decimal and #x integers, decimal floats with exponents,
- * SRFI-270 hex floats (#x1.921fb54442d18p+1), and #u8(...) bytevectors.
+ * SRFI-270 hex floats (#x1.921fb54442d18p+1), R7RS character literals as
+ * integer Unicode scalar values, and #u8(...) bytevectors of numeric bytes.
  *
  * A string escape names a Unicode character, so "\x09;" is one byte and
  * "\xe9;" is the two bytes of its utf-8 encoding. A data segment that needs
@@ -14,7 +15,7 @@
  * element is written as a byte and stored as one.
  *
  * Not supported, because no MARV input uses it: #| |# and #; comments, vectors,
- * characters, booleans, quote/quasiquote, |bar| symbols, dotted pairs,
+ * booleans, quote/quasiquote, |bar| symbols, dotted pairs,
  * exactness and radix prefixes other than #x.
  */
 
@@ -25,7 +26,7 @@ typedef enum snt {
   SN_NULL = 0,
   SN_LIST,      /* (...) */
   SN_SYM,       /* foo, $foo, i32.const, ... */
-  SN_INT,       /* 42, -1, #x2a */
+  SN_INT,       /* 42, -1, #x2a, #\space */
   SN_FLT,       /* 1.5, 1e3, #x1.8p+1 */
   SN_STR,       /* "...", bytes after utf-8 encoding */
   SN_BVEC       /* #u8(0 1 255), bytes as written */

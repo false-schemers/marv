@@ -1,0 +1,18 @@
+;; R7RS character literals behave like their integer code points.
+(module $characters
+  (const $letter i32 #\λ)
+  (const $smile i64 #\😀)
+  (data $bytes (export "bytes") const #u8(0 #x41 255))
+  (func $check (export "check") (result i32)
+    (if (i32.ne (i32.const #\space) (i32.const 32)) (then (return (i32.const 1))))
+    (if (i32.ne (i32.const #\λ) (i32.const #x3BB)) (then (return (i32.const 2))))
+    (if (i64.ne (i64.const #\😀) (i64.const #x1F600)) (then (return (i32.const 3))))
+    (if (i32.ne (i32.const #\x03Bb) (const $letter)) (then (return (i32.const 4))))
+    (if (i64.ne (i64.const #\x1F600) (const $smile)) (then (return (i32.const 5))))
+    (if (i32.ne (i32.const #\)) (i32.const 41)) (then (return (i32.const 6))))
+    (if (i32.ne (i32.const #\;) (i32.const 59)) (then (return (i32.const 7))))
+    (if (i32.ne (i32.const #\newline) (i32.const 10)) (then (return (i32.const 8))))
+    (if (i32.ne (i32.const #\x10FFFF) (i32.const 1114111)) (then (return (i32.const 9))))
+    (return (i32.const 0)))
+  (func $main (export "main") (param $argc i32) (param $argv ptr) (result i32)
+    (return (call $check))))

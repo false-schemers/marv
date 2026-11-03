@@ -7,6 +7,9 @@ The `test/` directory contains the automated test suite for the MARV compiler, R
 - `test/rv64-sim-numbers.scm` — Tests for the standalone RV64 simulator’s byte and IEEE floating-point helpers.
 - `test/edge.mvs`, `test/edge.expected`, `test/edge-rv64.scm` — Instruction edge cases (shift-count masking, signed and unsigned division and remainder, `clz`/`ctz` of zero, sign extension, truncation, `nearest` ties-to-even, narrow loads with both sign extensions, `br_table` defaults). Each function returns one `i32`, so the `cc` build and the `rv64g` assembly can be compared with each other and with `test/edge.expected`, which holds what WebAssembly semantics require.
 - `test/grouped-locals.mvs`, `test/grouped-locals-rv64.scm` — Grouped local declarations across scalar types, macro use, and RV64G simulation.
+- `test/default-target.sh` — Platform target defaults and explicit overrides, including a simulated Windows driver build.
+- `test/characters.mvs`, `test/characters.sh`, `test/characters-rv64.scm` — Character literal decoding, Unicode validity, bytevector rejection, and cross-target equivalence.
+- `test/makefile.sh` — Relocatable `-M` builds, dependency packaging, makefile cleanup, and temporary-directory isolation.
 - `test/optimization.sh` — Backend optimization template defaults, overrides, error handling, and native execution; independent of `src/`.
 - `test/native-stdio.c` — Native adapter regressions for bounded formatting, length modifiers, bounded input, and stream scanning.
 - `test/run-tests.sh` — End-to-end test runner that verifies:
@@ -21,6 +24,9 @@ The `test/` directory contains the automated test suite for the MARV compiler, R
   9. Native formatted I/O regressions.
   10. Linker paths with spaces, precompiled adapter dependencies, path rejection and failed-link cleanup.
   11. Grouped local declarations against separate declarations across the CC, WCPL and RV64G backends, plus invalid declarations.
+  12. Relocatable `-M` makefile builds and their cleanup targets.
+  13. Character literals as integers, including UTF-8 and bytevector restrictions.
+  14. Default target selection and explicit target overrides.
 
 ## Running the Tests
 

@@ -134,7 +134,7 @@ bool sropen(sread_t *pr, const char *fname)
   FILE *fp;
   memset(pr, 0, sizeof(sread_t));
   bufinit(&pr->tok, sizeof(char));
-  fp = fopen(fname, "r");
+  fp = fopen(fname, "rb");
   if (fp == NULL) return false;
   pr->fp = fp;
   pr->fname = intern(fname);
@@ -342,7 +342,70 @@ static void sr_string(sread_t *pr, snode_t *pn)
   }
 }
 
-static void sr_atom(sread_t *pr, snode_t *pn);
+/* R7RS characters denote integer Unicode scalar values in MARV. Character
+ * names are case-sensitive; hex digits and the x prefix are case-insensitive. */
+static void sr_character(sread_t *pr, snode_t *pn)
+{
+  const unsigned char *s;
+  size_t n, i, expected;
+  unsigned long v, minimum;
+  int d;
+  if (pr->ch == EOF) sreprintf(pr, "incomplete character literal");
+  bufclear(&pr->tok);
+  /* A delimiter can itself be the character, e.g. #\\) or a literal space. */
+  if (sr_delim(pr->ch)) {
+    v = (unsigned long)srgetc(pr);
+    if (!sr_delim(pr->ch)) sreprintf(pr, "character literal must be followed by a delimiter");
+    pn->nt = SN_INT; pn->ival = (long long)v;
+    return;
+  }
+  while (!sr_delim(pr->ch)) *(char*)bufnewbk(&pr->tok) = (char)srgetc(pr);
+  n = buflen(&pr->tok);
+  *(char*)bufnewbk(&pr->tok) = '\0';
+  s = (const unsigned char *)bufdata(&pr->tok);
+  if (n > 1) {
+    for (i = 0; i < n; ++i)
+      if (s[i] == 0) sreprintf(pr, "invalid NUL in character literal");
+  }
+  if (n == 1 && s[0] < 0x80) v = s[0];
+  else if (n > 1 && (s[0] == 'x' || s[0] == 'X')) {
+    v = 0;
+    for (i = 1; i < n; ++i) {
+      d = sr_hexval(s[i]);
+      if (d < 0) sreprintf(pr, "invalid hexadecimal character literal");
+      if (v > 0x10FFFFUL / 16UL) sreprintf(pr, "character literal out of Unicode range");
+      v = v * 16UL + (unsigned long)d;
+      if (v > 0x10FFFFUL) sreprintf(pr, "character literal out of Unicode range");
+    }
+    if (v >= 0xD800UL && v <= 0xDFFFUL)
+      sreprintf(pr, "character literal is not a Unicode scalar value");
+  } else if (streql((const char *)s, "alarm")) v = 7;
+  else if (streql((const char *)s, "backspace")) v = 8;
+  else if (streql((const char *)s, "delete")) v = 127;
+  else if (streql((const char *)s, "escape")) v = 27;
+  else if (streql((const char *)s, "newline")) v = 10;
+  else if (streql((const char *)s, "null")) v = 0;
+  else if (streql((const char *)s, "return")) v = 13;
+  else if (streql((const char *)s, "space")) v = 32;
+  else if (streql((const char *)s, "tab")) v = 9;
+  else {
+    if (s[0] >= 0xC2 && s[0] <= 0xDF) { expected = 2; v = s[0] & 0x1FUL; minimum = 0x80UL; }
+    else if (s[0] >= 0xE0 && s[0] <= 0xEF) { expected = 3; v = s[0] & 0x0FUL; minimum = 0x800UL; }
+    else if (s[0] >= 0xF0 && s[0] <= 0xF4) { expected = 4; v = s[0] & 0x07UL; minimum = 0x10000UL; }
+    else sreprintf(pr, "unknown or invalid character literal");
+    if (n != expected) sreprintf(pr, "character literal must contain exactly one UTF-8 character");
+    for (i = 1; i < expected; ++i) {
+      if ((s[i] & 0xC0) != 0x80) sreprintf(pr, "invalid UTF-8 in character literal");
+      v = (v << 6) | (s[i] & 0x3FUL);
+    }
+    if (v < minimum || v > 0x10FFFFUL || (v >= 0xD800UL && v <= 0xDFFFUL))
+      sreprintf(pr, "invalid UTF-8 Unicode scalar value in character literal");
+  }
+  pn->nt = SN_INT;
+  pn->ival = (long long)v;
+}
+
+static void sr_atom(sread_t *pr, snode_t *pn, bool allow_character);
 
 /* #u8(...): each element is a byte, stored as written */
 static void sr_bvec(sread_t *pr, snode_t *pn)
@@ -358,7 +421,7 @@ static void sr_bvec(sread_t *pr, snode_t *pn)
     pr->tline = pr->line; pr->tcol = pr->col;
     snclear(&el);
     if (pr->ch == '(' || pr->ch == '"') sreprintf(pr, "#u8(...) takes byte values only");
-    sr_atom(pr, &el);
+    sr_atom(pr, &el, false);
     if (el.nt != SN_INT || el.ival < 0 || el.ival > 255)
       sreprintf(pr, "#u8(...) element is not a byte in 0..255");
     *(char*)bufnewbk(&pn->data) = (char)(unsigned char)el.ival;
@@ -366,10 +429,20 @@ static void sr_bvec(sread_t *pr, snode_t *pn)
   snfini(&el);
 }
 
-static void sr_atom(sread_t *pr, snode_t *pn)
+static void sr_atom(sread_t *pr, snode_t *pn, bool allow_character)
 {
   char *s;
   bufclear(&pr->tok);
+  if (pr->ch == '#') {
+    srgetc(pr);
+    if (pr->ch == '\\') {
+      if (!allow_character) sreprintf(pr, "character literals are not allowed in #u8(...)");
+      srgetc(pr);
+      sr_character(pr, pn);
+      return;
+    }
+    *(char*)bufnewbk(&pr->tok) = '#';
+  }
   while (!sr_delim(pr->ch)) *(char*)bufnewbk(&pr->tok) = (char)srgetc(pr);
   *(char*)bufnewbk(&pr->tok) = '\0';
   s = (char*)bufdata(&pr->tok);
@@ -398,7 +471,7 @@ static void sr_form(sread_t *pr, snode_t *pn)
   if (pr->ch == EOF) sreprintf(pr, "unexpected end of file");
   if (pr->ch == ')') sreprintf(pr, "unbalanced ')'");
   if (pr->ch == '"') { sr_string(pr, pn); return; }
-  if (pr->ch != '(') { sr_atom(pr, pn); return; }
+  if (pr->ch != '(') { sr_atom(pr, pn, true); return; }
   srgetc(pr);
   pn->nt = SN_LIST;
   for (;;) {
