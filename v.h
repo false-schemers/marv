@@ -18,6 +18,7 @@ extern void cc_decls_write(const mod_t *pm, FILE *fp);
 extern void cc_func(const mod_t *pm, const fn_t *pf, FILE *fp);
 
 extern void cc_static(const mod_t *pm, snode_t *pn, FILE *fp);
+extern void cc_data_init(const mod_t *pm, snode_t *pn, FILE *fp);
 
 /* the wo target: the module wrapper, its statics, and a function at a time */
 extern void wo_prologue(mod_t *pm, FILE *fp);

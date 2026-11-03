@@ -296,3 +296,7 @@ SKINT_BIN="$SKINT_BIN" SKINT_LIB="$SKINT_LIB" WCPL_BIN="$WCPL_BIN" WCPL_HOME="$W
 echo ""
 echo "14. Testing platform default targets..."
 CC="$CC" bash test/default-target.sh "$MARV_BIN"
+
+echo ""
+echo "15. Testing target-native typed data initialization..."
+CC="$CC" TEST_WASI_COMPILER="$TEST_WORK/wcpl_marv.wasm" bash test/native-data.sh "$MARV_BIN"

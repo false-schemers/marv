@@ -379,38 +379,50 @@ static void flatten_pass(mod_t *pm, const char *path, bool show)
   srclose(&rd);
 }
 
-/* emit one module as a cc translation unit: globals, data, then functions */
+/* Emit all C storage before startup constructors, then functions. Keeping the
+ * storage in the head lets split_file place it in piece zero and give every
+ * other piece the correct extern declarations. */
 static void emit_pass(mod_t *pm, const char *path, FILE *fp)
 {
   sread_t rd;
   snode_t nd;
-  bool ismod;
-  if (!sropen(&rd, path)) { fprintf(stderr, "cannot open %s\n", path); exit(1); }
-  sninit(&nd);
+  int phase;
   cc_prologue_write(fp);
   cc_decls_write(pm, fp);
   cc_tramp_areas(pm, fp);
-  while (srlopen(&rd, &nd)) {
-    ismod = false;
-    if (srlnext(&rd, &nd))
-      if (nd.nt == SN_SYM && streql(symname(nd.sym), "module")) ismod = true;
-    if (!ismod) { while (srlnext(&rd, &nd)) { } continue; }
-    if (srlnext(&rd, &nd)) { }           /* the module name */
-    while (srlnext(&rd, &nd)) {
-      fn_t fn;
-      bool istramp;
-      if (is_head(&nd, "data") || is_head(&nd, "global")) { cc_static(pm, &nd, fp); continue; }
-      istramp = is_head(&nd, "trampoline_func");
-      if (!is_head(&nd, "func") && !istramp) continue;
-      if (!fn_unstack(pm, &nd, &fn)) continue;
-      g_nfuncs += 1;
-      if (istramp) cc_tramp_func(pm, &fn, fp);
-      else cc_func(pm, &fn, fp);
-      fn_fini(&fn);
+  for (phase = 0; phase < 3; ++phase) {
+    if (!sropen(&rd, path)) { fprintf(stderr, "cannot open %s\n", path); exit(1); }
+    sninit(&nd);
+    while (srlopen(&rd, &nd)) {
+      bool ismod;
+      ismod = false;
+      if (srlnext(&rd, &nd))
+        if (nd.nt == SN_SYM && streql(symname(nd.sym), "module")) ismod = true;
+      if (!ismod) { while (srlnext(&rd, &nd)) { } continue; }
+      if (srlnext(&rd, &nd)) { }       /* the module name */
+      while (srlnext(&rd, &nd)) {
+        fn_t fn;
+        bool istramp;
+        if (phase == 0) {
+          if (is_head(&nd, "data") || is_head(&nd, "global")) cc_static(pm, &nd, fp);
+          continue;
+        }
+        if (phase == 1) {
+          if (is_head(&nd, "data")) cc_data_init(pm, &nd, fp);
+          continue;
+        }
+        istramp = is_head(&nd, "trampoline_func");
+        if (!is_head(&nd, "func") && !istramp) continue;
+        if (!fn_unstack(pm, &nd, &fn)) continue;
+        g_nfuncs += 1;
+        if (istramp) cc_tramp_func(pm, &fn, fp);
+        else cc_func(pm, &fn, fp);
+        fn_fini(&fn);
+      }
     }
+    snfini(&nd);
+    srclose(&rd);
   }
-  snfini(&nd);
-  srclose(&rd);
 }
 
 /* emit one module as a .wo object */

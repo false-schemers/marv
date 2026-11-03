@@ -1088,22 +1088,6 @@ static void dseg_putint(buf_t *pb, unsigned long long v, int w)
     *(char *)bufnewbk(pb) = (char)(unsigned char)(v >> (8 * i));
 }
 
-static void dseg_putf32(buf_t *pb, double d)
-{
-  float f;
-  uint32_t u;
-  f = (float)d;
-  memcpy(&u, &f, 4);
-  dseg_putint(pb, (unsigned long long)u, 4);
-}
-
-static void dseg_putf64(buf_t *pb, double d)
-{
-  uint64_t u;
-  memcpy(&u, &d, 8);
-  dseg_putint(pb, (unsigned long long)u, 8);
-}
-
 /* the numeric value of one item element, which the reader may have read as
  * either kind: (f64 1) and (i32 1.0) both say one */
 static long long dseg_ival(snode_t *pn)
@@ -1167,8 +1151,9 @@ static void dseg_ptrs(snode_t *pc, dseg_t *pd)
   }
 }
 
-/* (iN v ...), (uN v ...), (fN v ...): one element per value, little-endian */
-static bool dseg_scalars(snode_t *pc, dseg_t *pd)
+/* (iN v ...), (uN v ...), (fN v ...): retain typed values and optionally
+ * write their little-endian image for the non-C targets. */
+static bool dseg_scalars(snode_t *pc, dseg_t *pd, bool little_endian_image)
 {
   const char *k;
   size_t j;
@@ -1184,14 +1169,32 @@ static bool dseg_scalars(snode_t *pc, dseg_t *pd)
   else if (streql(k, "f32")) { w = 4; isflo = true; }
   else if (streql(k, "f64")) { w = 8; isflo = true; }
   else return false;
+  if (w > 1 && snlen(pc) > 1) {
+    dnum_t *run;
+    run = (dnum_t *)bufnewbk(&pd->nums);
+    run->off = buflen(&pd->bytes);
+    run->count = snlen(pc) - 1;
+    run->first = buflen(&pd->numvals);
+    run->width = w;
+    run->kind = isflo ? ((w == 4) ? DNUM_F32 : DNUM_F64) : DNUM_INT;
+  }
   for (j = 1; j < snlen(pc); ++j) {
     snode_t *pv;
     pv = snref(pc, j);
-    if (isflo) {
-      if (w == 4) dseg_putf32(&pd->bytes, dseg_dval(pv));
-      else dseg_putf64(&pd->bytes, dseg_dval(pv));
-    } else {
-      dseg_putint(&pd->bytes, (unsigned long long)dseg_ival(pv), w);
+    {
+      unsigned long long bits;
+      if (isflo) {
+        double d;
+        d = dseg_dval(pv);
+        bits = (w == 4) ? (unsigned long long)as_uint32((float)d) : as_uint64(d);
+      } else {
+        bits = (unsigned long long)dseg_ival(pv);
+      }
+      if (w < 8) bits &= (((unsigned long long)1 << (w * 8)) - 1);
+      if (w > 1) *(unsigned long long *)bufnewbk(&pd->numvals) = bits;
+      /* C initializes typed runs separately; its byte image holds only raw
+       * bytes and zero placeholders. The other targets need LE data bytes. */
+      dseg_putint(&pd->bytes, (w == 1 || little_endian_image) ? bits : 0, w);
     }
   }
   return true;
@@ -1208,7 +1211,7 @@ static void dseg_zeros(buf_t *pb, long long n)
  * plain adjacent tokens, the examples write `(size 1048576)`.  Anything the
  * spec does not list is an error rather than a silently dropped item, which
  * is how typed items went missing before.  [cco] */
-void dseg_read(snode_t *pn, dseg_t *pd)
+void dseg_read(snode_t *pn, dseg_t *pd, bool little_endian_image)
 {
   size_t i, k;
   pd->name = 0;
@@ -1217,6 +1220,8 @@ void dseg_read(snode_t *pn, dseg_t *pd)
   pd->isconst = false;
   pd->allzero = true;
   bufinit(&pd->bytes, sizeof(char));
+  bufinit(&pd->nums, sizeof(dnum_t));
+  bufinit(&pd->numvals, sizeof(unsigned long long));
   bufinit(&pd->relocs, sizeof(drel_t));
   if (pn->nt != SN_LIST || snlen(pn) < 2 || snref(pn, 1)->nt != SN_SYM) return;
   pd->name = snref(pn, 1)->sym;
@@ -1255,7 +1260,7 @@ void dseg_read(snode_t *pn, dseg_t *pd)
         else dseg_zeros(&pd->bytes, snref(pc, 1)->ival);
       } else if (streql(k2, "ptr")) {
         dseg_ptrs(pc, pd);
-      } else if (!dseg_scalars(pc, pd)) {
+      } else if (!dseg_scalars(pc, pd, little_endian_image)) {
         sneprintf(pc, "(%s ...) is not a data item", k2);
       }
     } else {
@@ -1303,6 +1308,8 @@ void glb_read(snode_t *pn, vt_t vt, glb_init_t *pg)
 void dseg_fini(dseg_t *pd)
 {
   buffini(&pd->bytes);
+  buffini(&pd->nums);
+  buffini(&pd->numvals);
   buffini(&pd->relocs);
 }
 

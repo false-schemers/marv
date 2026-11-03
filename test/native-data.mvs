@@ -1,0 +1,21 @@
+;; Mixed data, including deliberately unaligned typed items. The native C
+;; harness checks each value against the host's own object representation.
+(module $data_test
+  (data $mixed (export "mixed") var align 8
+    #u8(170)
+    (i16 -2 #x1234) (u16 #xFEDC)
+    (i32 #x01020304 -1) (u32 #x89ABCDEF)
+    (i64 #x1122334455667788 -1)
+    (f32 1.5 -0.0 +inf.0 +nan.0)
+    (f64 -2.25 -0.0 -inf.0 +nan.0)
+    #u8(255 128 1) (size 3)
+    (ptr (ref.data $other 2) (ref.func $answer) (ptr.null)))
+  ;; Interleaving declarations must be safe even when the generated C is split.
+  (func $answer (export "answer") (result i32) (i32.const 42))
+  (data $other (export "other") var align 8 #u8(11 22 33 44))
+  (data $zeros (export "zeros") var (size 128) (i64 0) (f64 0.0))
+  (data $typed (export "typed") const (i32 123456789) (f64 3.25))
+  (data $floats (export "floats") var
+    (f32 #x1.0p-149 #x1.fffffep+127)
+    (f64 #x1.0p-1074 #x1.fffffffffffffp+1023))
+  (func $more (result i32) (i32.const 17)))

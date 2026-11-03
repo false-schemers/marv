@@ -12,6 +12,7 @@ The `test/` directory contains the automated test suite for the MARV compiler, R
 - `test/makefile.sh` — Relocatable `-M` builds, dependency packaging, makefile cleanup, and temporary-directory isolation.
 - `test/optimization.sh` — Backend optimization template defaults, overrides, error handling, and native execution; independent of `src/`.
 - `test/native-stdio.c` — Native adapter regressions for bounded formatting, length modifiers, bounded input, and stream scanning.
+- `test/native-data.mvs`, `test/native-data.c`, `test/native-data.sh`, `test/native-data-wasi.js` — Native-order typed data, raw bytes, unaligned runs, zero buffers, pointer relocations and split/package builds, including the WCPL/WASI-hosted compiler; also runs on big-endian PowerPC when a cross compiler and QEMU are available.
 - `test/run-tests.sh` — End-to-end test runner that verifies:
   1. Single-source compilation of every `lib/*.c` adapter file under both `cc` and `wcpl -c`.
   2. Backend `-O` template substitution and option validation.
@@ -27,6 +28,7 @@ The `test/` directory contains the automated test suite for the MARV compiler, R
   12. Relocatable `-M` makefile builds and their cleanup targets.
   13. Character literals as integers, including UTF-8 and bytevector restrictions.
   14. Default target selection and explicit target overrides.
+  15. Native-order typed data initialization, including an optional big-endian execution test.
 
 ## Running the Tests
 

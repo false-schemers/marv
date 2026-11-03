@@ -439,9 +439,7 @@ static const char *cc_prologue =
 "MARV_LDST(i64, int64_t) MARV_LDST(f32, float)\n"
 "MARV_LDST(f64, double) MARV_LDST(ptr, marv_ptr)\n"
 "\n"
-"/* a function that runs before main: a pointer slot inside a data segment\n"
-" * has no static form in C, because the address of one object inside\n"
-" * another's bytes is not a constant expression there. */\n"
+"/* Pre-main initialization of native-typed data runs and pointer slots. */\n"
 "#if defined(__GNUC__) || defined(__clang__)\n"
 "#define MARV_CTOR(f) static void f(void) __attribute__((constructor));\\\n"
 "                     static void f(void)\n"
@@ -1124,24 +1122,91 @@ static void cc_relname(const mod_t *pm, drel_t *pr, const char *mod, FILE *fp)
   cbfini(&nb);
 }
 
-/* the pointer slots of one segment, filled before main runs */
-static void cc_dreloc(const mod_t *pm, dseg_t *pd, const char *dname,
-                      const char *mod, FILE *fp)
+/* Runs whose representation is all zero need no copy from a C initializer. */
+static bool cc_data_nonzero(dseg_t *pd, dnum_t *run)
 {
   size_t i;
+  for (i = 0; i < run->count; ++i)
+    if (*(unsigned long long *)bufref(&pd->numvals, run->first + i) != 0) return true;
+  return false;
+}
+
+/* All storage declarations are emitted before these constructors, so both
+ * their relocations and the driver's C splitter can see every segment. A run's
+ * temporary array has the C target's native representation even when its
+ * destination in the byte image is unaligned. */
+void cc_data_init(const mod_t *pm, snode_t *pn, FILE *fp)
+{
+  dseg_t ds;
+  size_t i, j;
+  bool needs;
+  sym_t dn;
+  cbuf_t mn, nb;
+  const char *mod, *dname;
+  if (pn->nt != SN_LIST || snlen(pn) < 2 || snref(pn, 1)->nt != SN_SYM) return;
+  dseg_read(pn, &ds, false);
+  needs = buflen(&ds.relocs) != 0;
+  for (i = 0; i < buflen(&ds.nums); ++i)
+    if (cc_data_nonzero(&ds, (dnum_t *)bufref(&ds.nums, i))) needs = true;
+  if (!needs) { dseg_fini(&ds); return; }
+  cbinit(&mn); cc_ident(symname(pm->name), &mn); cbputc(0, &mn);
+  mod = (const char *)cbdata(&mn);
+  cbinit(&nb);
+  dn = mod_dataname((mod_t *)pm, snref(pn, 1)->sym);
+  if (dn != 0) cbputs(symname(dn), &nb);
+  else { cbputs(mod, &nb); cbputc('_', &nb); cc_ident(symname(snref(pn, 1)->sym), &nb); }
+  cbputc(0, &nb);
+  dname = (const char *)cbdata(&nb);
   fputs("#ifdef MARV_NO_CTOR\n", fp);
-  fputs("#error \"a pointer slot in a data segment needs a function that runs"
-        " before main, and this compiler has no way to ask for one\"\n", fp);
+  fputs("#error \"typed data or pointer relocations require a startup constructor\"\n", fp);
   fputs("#endif\n", fp);
   fprintf(fp, "MARV_CTOR(marv_reloc_%s)\n{\n", dname);
-  for (i = 0; i < buflen(&pd->relocs); ++i) {
+  for (i = 0; i < buflen(&ds.nums); ++i) {
+    dnum_t *run;
+    const char *type;
+    run = (dnum_t *)bufref(&ds.nums, i);
+    if (!cc_data_nonzero(&ds, run)) continue;
+    type = (run->kind == DNUM_F32) ? "float" : (run->kind == DNUM_F64) ? "double"
+         : (run->width == 2) ? "uint16_t" : (run->width == 4) ? "uint32_t" : "uint64_t";
+    fprintf(fp, "  static const %s marv_run_%lu[%lu] = {", type,
+            (unsigned long)i, (unsigned long)run->count);
+    for (j = 0; j < run->count; ++j) {
+      unsigned long long bits;
+      bits = *(unsigned long long *)bufref(&ds.numvals, run->first + j);
+      if (j > 0) fputs(",", fp);
+      if ((j % 6) == 0) fputs("\n    ", fp);
+      if (run->kind == DNUM_INT) {
+        fprintf(fp, "(uint%d_t)UINT64_C(0x%llx)", run->width * 8, bits);
+      } else {
+        double d;
+        int nf;
+        d = (run->kind == DNUM_F32) ? (double)as_float((unsigned)bits) : as_double(bits);
+        nf = nonfinite(d);
+        if (nf == 2) fputs("(HUGE_VAL - HUGE_VAL)", fp);
+        else if (nf == 1) fputs((d < 0.0) ? "(-HUGE_VAL)" : "HUGE_VAL", fp);
+        else {
+          char num[48];
+          udtohex(as_uint64(d), &num[0]);
+          fputs(&num[0], fp);
+        }
+      }
+    }
+    fputs("\n  };\n", fp);
+  }
+  for (i = 0; i < buflen(&ds.nums); ++i) {
+    dnum_t *run;
+    run = (dnum_t *)bufref(&ds.nums, i);
+    if (!cc_data_nonzero(&ds, run)) continue;
+    fprintf(fp, "  memcpy(%s + %lu, marv_run_%lu, sizeof(marv_run_%lu));\n",
+            dname, (unsigned long)run->off, (unsigned long)i, (unsigned long)i);
+  }
+  for (i = 0; i < buflen(&ds.relocs); ++i) {
     drel_t *pr;
-    pr = (drel_t *)bufref(&pd->relocs, i);
+    pr = (drel_t *)bufref(&ds.relocs, i);
     fprintf(fp, "  MARV_STORE(ptr, %s, %lu, (marv_ptr)", dname,
             (unsigned long)pr->off);
-    if (pr->isfunc) {
-      cc_relname(pm, pr, mod, fp);
-    } else {
+    if (pr->isfunc) cc_relname(pm, pr, mod, fp);
+    else {
       fputs("(", fp);
       cc_relname(pm, pr, mod, fp);
       if (pr->addend != 0) fprintf(fp, " + %lld", pr->addend);
@@ -1149,7 +1214,9 @@ static void cc_dreloc(const mod_t *pm, dseg_t *pd, const char *dname,
     }
     fputs(");\n", fp);
   }
-  fputs("}\n", fp);
+  fputs("}\n\n", fp);
+  cbfini(&nb); cbfini(&mn);
+  dseg_fini(&ds);
 }
 
 void cc_static(const mod_t *pm, snode_t *pn, FILE *fp)
@@ -1178,7 +1245,7 @@ void cc_static(const mod_t *pm, snode_t *pn, FILE *fp)
     sym_t dn;
     cbuf_t db;
     const char *dname;
-    dseg_read(pn, &ds);
+    dseg_read(pn, &ds, false);
     dn = mod_dataname((mod_t *)pm, snref(pn, 1)->sym);
     cbinit(&db);
     if (dn != 0) cbputs(symname(dn), &db);
@@ -1200,7 +1267,6 @@ void cc_static(const mod_t *pm, snode_t *pn, FILE *fp)
       fputs("}", fp);
     }
     fputs(";\n", fp);
-    if (buflen(&ds.relocs) > 0) cc_dreloc(pm, &ds, dname, mod, fp);
     fputs("\n", fp);
     cbfini(&db);
     dseg_fini(&ds);
@@ -1938,7 +2004,7 @@ void wo_static(mod_t *pm, snode_t *pn, FILE *fp)
     long long align;
     const char *exp;
     bool allzero;
-    dseg_read(pn, &ds);
+    dseg_read(pn, &ds, true);
     align = ds.align;
     exp = ds.expname;
     isconst = ds.isconst;
@@ -3387,7 +3453,7 @@ void rv_static(mod_t *pm, snode_t *pn, FILE *fp)
     dseg_t ds;
     sym_t dn;
     size_t nrel;
-    dseg_read(pn, &ds);
+    dseg_read(pn, &ds, true);
     nrel = buflen(&ds.relocs);
     dn = mod_dataname(pm, snref(pn, 1)->sym);
     fputs(ds.isconst ? "  .section .rodata\n" : "  .data\n", fp);

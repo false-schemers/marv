@@ -255,19 +255,30 @@ typedef struct drel {
   bool isfunc;
 } drel_t;
 
-/* a (data ...) clause read once, for whichever target wants it.  The image is
- * little-endian, which is the byte order of all three targets. */
+/* A numeric run retains its type, position and values independently of raw
+ * bytes. C emits native-typed initializers; WebAssembly and RV64 request a
+ * little-endian byte image from the same data declaration. */
+typedef enum dnum_kind { DNUM_INT, DNUM_F32, DNUM_F64 } dnum_kind_t;
+typedef struct dnum {
+  size_t off, count, first;
+  int width;
+  dnum_kind_t kind;
+} dnum_t;
+
+/* A data clause's byte/zero image, numeric runs and pointer relocations. */
 typedef struct dseg {
   sym_t name;
   const char *expname;  /* (export "s"), or NULL */
   long long align;
   bool isconst;
-  bool allzero;         /* so a large zeroed buffer needs no initializer */
+  bool allzero;         /* byte image is zero, independent of numeric runs */
   buf_t bytes;          /* char */
+  buf_t nums;           /* dnum_t, numeric items wider than a byte */
+  buf_t numvals;        /* unsigned long long: integer or IEEE bit patterns */
   buf_t relocs;         /* drel_t */
 } dseg_t;
 
-extern void dseg_read(snode_t *pn, dseg_t *pd);
+extern void dseg_read(snode_t *pn, dseg_t *pd, bool little_endian_image);
 /* a (global ...) clause's mutability and its initial value, which a target
  * has to emit: dropping it would change what the program means */
 typedef struct glb_init {
