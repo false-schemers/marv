@@ -39,5 +39,25 @@
     (local.set $e (f64.add (local.get $d) (f64.const 0.5)))
     (if (f64.ne (local.get $e) (f64.const 2.0)) (then (return (i32.const 12))))
     (return (i32.const 0)))
+  ;; Grouped parameters are as many parameters as there are names, in order,
+  ;; and the caller's arguments have to line up with them.
+  (func $params (param $a $b $c i64) (param $d i64) (result i64)
+    (return (i64.add (i64.add (local.get $a) (i64.mul (local.get $b) (i64.const 10)))
+                     (i64.add (i64.mul (local.get $c) (i64.const 100))
+                              (i64.mul (local.get $d) (i64.const 1000))))))
+  (func $paramsmixed (param $p $q ptr) (param $x $y f64) (result f64)
+    (if (ptr.ne (local.get $p) (local.get $q)) (then (return (f64.const 0.0))))
+    (return (f64.sub (local.get $x) (local.get $y))))
+
+  (func $checkparams (export "checkparams") (result i32)
+    (if (i64.ne (call $params (i64.const 1) (i64.const 2) (i64.const 3) (i64.const 4))
+                (i64.const 4321))
+      (then (return (i32.const 21))))
+    (if (f64.ne (call $paramsmixed (ptr.null) (ptr.null) (f64.const 2.5) (f64.const 0.25))
+                (f64.const 2.25))
+      (then (return (i32.const 22))))
+    (return (i32.const 0)))
+
   (func $main (export "main") (param $argc i32) (param $argv ptr) (result i32)
-    (return (call $check))))
+    (if (call $check) (then (return (call $check))))
+    (return (call $checkparams))))

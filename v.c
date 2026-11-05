@@ -1180,14 +1180,19 @@ void cc_data_init(const mod_t *pm, snode_t *pn, FILE *fp)
       } else {
         double d;
         int nf;
+        const char *cast;
+        /* HUGE_VAL and a hex literal are both double: an f32 run needs the
+         * cast its element type asks for, as an f32 immediate does. */
+        cast = (run->kind == DNUM_F32) ? "(marv_f32)" : "";
         d = (run->kind == DNUM_F32) ? (double)as_float((unsigned)bits) : as_double(bits);
         nf = nonfinite(d);
-        if (nf == 2) fputs("(HUGE_VAL - HUGE_VAL)", fp);
-        else if (nf == 1) fputs((d < 0.0) ? "(-HUGE_VAL)" : "HUGE_VAL", fp);
+        if (nf == 2) fprintf(fp, "(%s(HUGE_VAL - HUGE_VAL))", cast);
+        else if (nf == 1)
+          fprintf(fp, "(%s%sHUGE_VAL)", cast, (d < 0.0) ? "-" : "");
         else {
           char num[48];
           udtohex(as_uint64(d), &num[0]);
-          fputs(&num[0], fp);
+          fprintf(fp, "(%s%s)", cast, &num[0]);
         }
       }
     }

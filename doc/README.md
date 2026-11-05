@@ -191,10 +191,10 @@ Inside `(module ...)`:
   - `"..."` — raw string bytes
   - `#u8(...)` — raw bytes, written as byte values
   - `(size N)` or `size N` — `N` zero bytes
-  - `(i8 v...)` — 1-byte integers
-  - `(i16 v...)` — 2-byte integers
-  - `(i32 v...)` — 4-byte integers
-  - `(i64 v...)` — 8-byte integers
+  - `(i8 v...)` — 1-byte integers; `u8` and `bytes` are accepted spellings
+  - `(i16 v...)` — 2-byte integers; `u16` is an accepted spelling
+  - `(i32 v...)` — 4-byte integers; `u32` is an accepted spelling
+  - `(i64 v...)` — 8-byte integers; `u64` is an accepted spelling
   - `(f32 v...)` — 4-byte IEEE-754 floats
   - `(f64 v...)` — 8-byte IEEE-754 doubles
   - `(ptr sym-or-0 ...)` — 8-byte pointer slots initialized to a data symbol `$sym` or `0` (`ptr.null`)
@@ -243,7 +243,7 @@ Inside `(module ...)`:
 
 ```scheme
 (func $name [(export "external_name")]
-  (param $p1 <type>) ...
+  (param $p1 [$p2 ...] <type>) ...   ;; One or more parameters of a shared type
   [(param ...)]                      ;; Marks function as variadic (see Section 7.3)
   [(result <type> | (record $R))]    ;; Optional single return value or record return
   [(frame <bytes>)]                  ;; Optional addressable stack frame size
@@ -251,14 +251,17 @@ Inside `(module ...)`:
   <instr> ...)
 ```
 
-A local declaration may name one or more variables followed by their shared
-scalar type (`i32`, `i64`, `f32`, `f64`, or `ptr`). For example,
+A `local` or `param` declaration may name one or more variables followed by
+their shared scalar type (`i32`, `i64`, `f32`, `f64`, or `ptr`). For example,
 `(local $t1 $t2 $t3 ptr)` is equivalent to three separate declarations
-`(local $t1 ptr)`, `(local $t2 ptr)`, and `(local $t3 ptr)`, in that order.
-Each variable is independently initialized to zero (or `ptr.null`). The
-existing single-name form remains valid. The declaration requires at least
-one name; this shorthand applies to `local`, not `param` or a macro's
-`(locals ...)` clause.
+`(local $t1 ptr)`, `(local $t2 ptr)`, and `(local $t3 ptr)`, in that order,
+and `(param $a $b i64)` declares two `i64` parameters in that order. Each
+local is independently initialized to zero (or `ptr.null`). The single-name
+form remains valid. It is an error for such a declaration to carry no name,
+to end in anything other than a scalar type, or to name anything other than
+`$`-prefixed variables. The shorthand does not apply to a macro's
+`(locals ...)` clause, whose entries are `($name <type>)` pairs, nor to
+`(param ...)`, which marks a function variadic.
 
 All `(param ...)`, `(result ...)`, `(frame ...)`, and `(local ...)` declarations must precede the instruction body.
 
@@ -268,7 +271,7 @@ entered and where it comes back to:
 
 ```scheme
 (trampoline_func $run [(export "external_name")]
-  (param $p1 <type>) ...
+  (param $p1 [$p2 ...] <type>) ...   ;; One or more parameters of a shared type
   (result ptr)                       ;; or i64: the chain's own return channel
   <instr> ...)                       ;; a body whose last act starts the chain
 ```

@@ -1549,19 +1549,36 @@ static void declare_func(mod_t *pm, snode_t *pn)
     if (pc->nt != SN_LIST || snlen(pc) < 1 || snref(pc, 0)->nt != SN_SYM) continue;
     h = symname(snref(pc, 0)->sym);
     if (streql(h, "param")) {
-      size_t j;
-      /* a clause carries a name and a type, a type alone, or several types:
-       * (param $x T), (param T), (param T T ...) and (param ...) all occur,
-       * so every element that names a type is one parameter */
-      for (j = 1; j < snlen(pc); ++j) {
+      size_t j, n, nnames;
+      vt_t shared;
+      /* a clause carries one or more names sharing a trailing type, a type
+       * alone, several types, or the variadic marker: (param $x T),
+       * (param $x $y T), (param T), (param T T ...) and (param ...) all
+       * occur.  Names say how many parameters share that type, so this has
+       * to agree with fn_header; without names, every element that names a
+       * type is one parameter. */
+      n = snlen(pc);
+      nnames = 0;
+      for (j = 1; j < n; ++j) {
         snode_t *pt;
         pt = snref(pc, j);
-        if (pt->nt != SN_SYM) continue;
-        if (streql(symname(pt->sym), "...")) { variadic = true; continue; }
-        {
-          vt_t vt;
-          vt = vt_of_sym(pt->sym);
-          if (vt != VT_VOID) *(vt_t *)bufnewbk(&ps->ptypes) = vt;
+        if (pt->nt == SN_SYM && symname(pt->sym)[0] == '$') nnames += 1;
+      }
+      shared = (n > 2 && snref(pc, n - 1)->nt == SN_SYM)
+                 ? vt_of_sym(snref(pc, n - 1)->sym) : VT_VOID;
+      if (nnames > 0 && nnames + 2 == n && shared != VT_VOID) {
+        for (j = 0; j < nnames; ++j) *(vt_t *)bufnewbk(&ps->ptypes) = shared;
+      } else {
+        for (j = 1; j < n; ++j) {
+          snode_t *pt;
+          pt = snref(pc, j);
+          if (pt->nt != SN_SYM) continue;
+          if (streql(symname(pt->sym), "...")) { variadic = true; continue; }
+          {
+            vt_t vt;
+            vt = vt_of_sym(pt->sym);
+            if (vt != VT_VOID) *(vt_t *)bufnewbk(&ps->ptypes) = vt;
+          }
         }
       }
     } else if (streql(h, "result")) {
@@ -3641,11 +3658,26 @@ size_t fn_header(mod_t *pm, snode_t *pn, fn_t *pf)
         first = i + 1;
         continue;
       }
-      if (snlen(pc) < 3) break;
-      pv = (var_t *)bufnewbk(&pf->vars);
-      pv->name = snref(pc, 1)->sym;
-      pv->vt = vt_of_sym(snref(pc, 2)->sym);
-      pf->nparams += 1;
+      {
+        size_t j, n;
+        vt_t vt;
+        snode_t *type;
+        n = snlen(pc);
+        if (n < 3) sneprintf(pc, "(param $name ... type) needs a name and type");
+        type = snref(pc, n - 1);
+        if (type->nt != SN_SYM || (vt = vt_of_sym(type->sym)) == VT_VOID)
+          sneprintf(pc, "(param $name ... type) needs a scalar type");
+        for (j = 1; j + 1 < n; ++j) {
+          snode_t *name;
+          name = snref(pc, j);
+          if (name->nt != SN_SYM || symname(name->sym)[0] != '$')
+            sneprintf(pc, "(param $name ... type) needs parameter names");
+          pv = (var_t *)bufnewbk(&pf->vars);
+          pv->name = name->sym;
+          pv->vt = vt;
+          pf->nparams += 1;
+        }
+      }
     } else if (streql(k, "result")) {
       if (snref(pc, 1)->nt == SN_SYM) {
         pf->res = vt_of_sym(snref(pc, 1)->sym);

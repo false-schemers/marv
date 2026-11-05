@@ -67,10 +67,11 @@ long marv_pid(void) { return 0; }
  * to stdout, so the printed script stays usable on its own. [cco] */
 int g_dryrun;
 
-/* A command path uses a deliberately small character set shared by the
- * Unix shell and Windows cmd.  Target command templates remain shell text. */
-static bool shell_path(cbuf_t *dst, const char *path, bool input, bool for_del);
-
+/* The wasm build drives a shell on some other host, so it writes Unix text.
+ * The test has to NEST rather than combine the two conditions: WCPL reads
+ * only `#ifdef __WCPL__`, `#ifndef __WCPL__`, `#if 0` and `#if 1`, treats
+ * them as comments and skips an inactive branch whole, so the _WIN32 test
+ * must sit inside one of those. [cco] */
 #ifndef __WCPL__
 #ifdef _WIN32
 static bool host_windows(void) { return true; }
@@ -81,6 +82,8 @@ static bool host_windows(void) { return false; }
 static bool host_windows(void) { return false; }
 #endif
 
+/* A command path uses a deliberately small character set shared by the
+ * Unix shell and Windows cmd.  Target command templates remain shell text. */
 static bool shell_path(cbuf_t *dst, const char *path, bool input, bool for_del)
 {
   const unsigned char *p;
@@ -1065,54 +1068,55 @@ static size_t split_file(const char *path, const char *objext, buf_t *pnames,
   return npieces;
 }
 
-static bool bad_command_path(cbuf_t *cmd, cbuf_t *src)
+/* Frees the operand list and answers whether the command was built.  A path
+ * that cannot be spelled for the shell fails the link, rather than running a
+ * command that means something else. */
+static bool link_command_done(cbuf_t *src, bool ok)
 {
-  cbfini(cmd);
   cbfini(src);
-  return false;
+  return ok;
 }
 
 static bool link_command(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs,
                          cbuf_t *pcmd)
 {
   cbuf_t src;
-  cbuf_t cmd;
   size_t i;
   cbinit(&src);
-  cbinit(&cmd);
   for (i = 0; i < buflen(pobjs); ++i) {
     if (cblen(&src) > 0) cbputc(' ', &src);
-    if (!shell_path(&src, symname(*(sym_t *)bufref(pobjs, i)), true, false)) return bad_command_path(&cmd, &src);
+    if (!shell_path(&src, symname(*(sym_t *)bufref(pobjs, i)), true, false))
+      return link_command_done(&src, false);
   }
   for (i = 0; i < buflen(pcs); ++i) {
     if (cblen(&src) > 0) cbputc(' ', &src);
-    if (!shell_path(&src, symname(*(sym_t *)bufref(pcs, i)), true, false)) return bad_command_path(&cmd, &src);
+    if (!shell_path(&src, symname(*(sym_t *)bufref(pcs, i)), true, false))
+      return link_command_done(&src, false);
   }
   cbputc(0, &src);
+  /* built straight into the caller's buffer, which it reads only on success */
+  cbclear(pcmd);
   if (pt->linkcmd != 0) {
     const char *s;
     s = symname(pt->linkcmd);
     while (*s != '\0') {
       if (s[0] == '~' && strncmp(s, "~src", 4) == 0) {
-        cbputs((const char *)cbdata(&src), &cmd); s += 4;
+        cbputs((const char *)cbdata(&src), pcmd); s += 4;
       } else if (s[0] == '~' && strncmp(s, "~exe", 4) == 0) {
-        if (!shell_path(&cmd, out, false, false)) return bad_command_path(&cmd, &src);
+        if (!shell_path(pcmd, out, false, false))
+          return link_command_done(&src, false);
         s += 4;
-      } else s += put_opt_template(&cmd, s);
+      } else s += put_opt_template(pcmd, s);
     }
   } else {
-    cbsetf(&cmd, "%s %s -o ", symname(pt->cc), symname(pt->flags));
-    if (!shell_path(&cmd, out, false, false)) return bad_command_path(&cmd, &src);
-    cbputc(' ', &cmd);
-    cbputs((const char *)cbdata(&src), &cmd);
+    cbsetf(pcmd, "%s %s -o ", symname(pt->cc), symname(pt->flags));
+    if (!shell_path(pcmd, out, false, false))
+      return link_command_done(&src, false);
+    cbputc(' ', pcmd);
+    cbputs((const char *)cbdata(&src), pcmd);
   }
-  cbputc(0, &cmd);
-  cbclear(pcmd);
-  cbputs((const char *)cbdata(&cmd), pcmd);
   cbputc(0, pcmd);
-  cbfini(&cmd);
-  cbfini(&src);
-  return true;
+  return link_command_done(&src, true);
 }
 
 static bool run_linker(tgt_t *pt, const char *out, buf_t *pobjs, buf_t *pcs)

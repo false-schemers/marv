@@ -242,7 +242,7 @@ test -s "$TEST_WORK/empty.c"
 echo "  [PASS] spaces, dependencies, invalid paths and failed-link cleanup!"
 
 echo ""
-echo "11. Testing grouped local declarations..."
+echo "11. Testing grouped local and parameter declarations..."
 # Compare with the equivalent individual declarations on every backend.
 sed \
   -e 's/(local \$p \$q \$r ptr)/(local $p ptr) (local $q ptr) (local $r ptr)/' \
@@ -250,6 +250,9 @@ sed \
   -e 's/(local \$x \$y i64)/(local $x i64) (local $y i64)/' \
   -e 's/(local \$f \$g f32)/(local $f f32) (local $g f32)/' \
   -e 's/(local \$d \$e f64)/(local $d f64) (local $e f64)/' \
+  -e 's/(param \$a \$b \$c i64)/(param $a i64) (param $b i64) (param $c i64)/' \
+  -e 's/(param \$p \$q ptr)/(param $p ptr) (param $q ptr)/' \
+  -e 's/(param \$x \$y f64)/(param $x f64) (param $y f64)/' \
   test/grouped-locals.mvs > "$TEST_WORK/grouped-expanded.mvs"
 for t in cc wcpl rv64g; do
   case $t in cc) ext=c;; wcpl) ext=wo;; rv64g) ext=s;; esac
@@ -274,13 +277,14 @@ cat > "$TEST_WORK/grouped-trampoline.mvs" <<'END'
 END
 "$MARV_BIN" -T target -t cc -o "$TEST_WORK/grouped-trampoline" "$TEST_WORK/grouped-trampoline.mvs"
 "$TEST_WORK/grouped-trampoline"
-for local_decl in '(local)' '(local $x)' '(local $x unknown)' '(local $x 7 ptr)' '(local $x i32 $y)'; do
+for local_decl in '(local)' '(local $x)' '(local $x unknown)' '(local $x 7 ptr)' '(local $x i32 $y)' \
+                 '(param)' '(param $x)' '(param $x unknown)' '(param $x 7 i64)' '(param $x i64 $y)'; do
   printf '(module $invalid (func $main (result i32) %s (return (i32.const 0))))\n' "$local_decl" > "$TEST_WORK/invalid.mvs"
   if "$MARV_BIN" -T target -t cc -c -o "$TEST_WORK/invalid.c" "$TEST_WORK/invalid.mvs" > /dev/null 2>&1; then
     echo "[FAIL] accepted invalid declaration: $local_decl" >&2; exit 1
   fi
 done
-echo "  [PASS] grouped locals, macro typing, equivalence and diagnostics!"
+echo "  [PASS] grouped locals and params, macro typing, equivalence and diagnostics!"
 
 
 echo ""
