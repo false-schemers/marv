@@ -7,7 +7,7 @@ The `test/` directory contains the automated test suite for the MARV compiler, R
 - `test/edge.mvs`, `test/edge.expected`, `test/edge-rv64.scm` — Instruction edge cases (shift-count masking, signed and unsigned division and remainder, `clz`/`ctz` of zero, sign extension, truncation, `nearest` ties-to-even, narrow loads with both sign extensions, `br_table` defaults). Each function returns one `i32`, so the `cc` build and the `rv64g` assembly can be compared with each other and with `test/edge.expected`, which holds what WebAssembly semantics require.
 - `test/grouped-locals.mvs`, `test/grouped-locals-rv64.scm` — Grouped local and parameter declarations across scalar types, macro use, and RV64G simulation.
 - `test/default-target.sh` — Platform target defaults and explicit overrides, including a simulated Windows driver build.
-- `test/characters.mvs`, `test/characters.sh`, `test/characters-rv64.scm` — Character literal decoding, Unicode validity, bytevector rejection, and cross-target equivalence.
+- `test/characters.mvs`, `test/characters.sh`, `test/characters-rv64.scm` — Character literal decoding, Unicode validity, bytevector rejection, `#b`/`#o` radix integers in and out of `#u8(...)`, labels generated from a name that is not a target identifier, and cross-target equivalence.
 - `test/makefile.sh` — Relocatable `-M` builds, dependency packaging, makefile cleanup, and temporary-directory isolation.
 - `test/optimization.sh` — Backend optimization template defaults, overrides, error handling, and native execution.
 - `test/native-stdio.c` — Native adapter regressions for bounded formatting, length modifiers, bounded input, and stream scanning.

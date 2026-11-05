@@ -14,5 +14,24 @@
     (if (i32.ne (i32.const #\newline) (i32.const 10)) (then (return (i32.const 8))))
     (if (i32.ne (i32.const #\x10FFFF) (i32.const 1114111)) (then (return (i32.const 9))))
     (return (i32.const 0)))
+  ;; #b and #o integers, in and out of #u8(...), and a function whose MARV
+  ;; name is not a C or assembler identifier: its generated labels have to
+  ;; go through the same mangling as every other name.
+  (data $radixbytes (export "radixbytes") const #u8(#b101 #o17 #x1f 42 #b11111111))
+  (func $radixchecks (export "radixchecks") (result i32)
+    (if (i32.ne (i32.const #b101110111) (i32.const 375)) (then (return (i32.const 31))))
+    (if (i32.ne (i32.const #o1637) (i32.const 927)) (then (return (i32.const 32))))
+    (if (i32.ne (i32.const #B1010) (i32.const #O12)) (then (return (i32.const 33))))
+    (if (i32.ne (i32.const #b-1011) (i32.const -11)) (then (return (i32.const 34))))
+    (if (i64.ne (i64.const #o-17) (i64.const -15)) (then (return (i32.const 35))))
+    (if (i32.ne (i32.load8_u offset 0 (ref.data $radixbytes)) (i32.const 5))
+      (then (return (i32.const 36))))
+    (if (i32.ne (i32.load8_u offset 1 (ref.data $radixbytes)) (i32.const 15))
+      (then (return (i32.const 37))))
+    (if (i32.ne (i32.load8_u offset 4 (ref.data $radixbytes)) (i32.const 255))
+      (then (return (i32.const 38))))
+    (return (i32.const 0)))
+
   (func $main (export "main") (param $argc i32) (param $argv ptr) (result i32)
-    (return (call $check))))
+    (if (call $check) (then (return (call $check))))
+    (return (call $radixchecks))))

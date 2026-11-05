@@ -293,7 +293,7 @@ CC="$CC" WCPL_BIN="$WCPL_BIN" bash test/makefile.sh "$MARV_BIN"
 
 
 echo ""
-echo "13. Testing R7RS character literals..."
+echo "13. Testing R7RS character literals, radix integers and name mangling..."
 SKINT_BIN="$SKINT_BIN" SKINT_LIB="$SKINT_LIB" WCPL_BIN="$WCPL_BIN" WCPL_HOME="$WCPL_HOME" \
   bash test/characters.sh "$MARV_BIN"
 

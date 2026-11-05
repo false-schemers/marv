@@ -33,7 +33,11 @@ MARV `.mvs` and `.mvh` files are sequences of S-expressions using a subset of R7
   - Module names, function names, globals, data labels, record names, field names, local variables, and block/loop labels are written with a leading `$` sigil (e.g. `$main`, `$vec3`, `$stdio:snprintf`, `$L_exit`).
   - Cross-module references use `$module:name` (where `module` may contain dots for nested namespaces, e.g. `$math.vec:cross`).
 - **Integer Literals:**
-  - Signed or unsigned decimal (`0`, `-42`, `1234567890123`) or hexadecimal (`#x73025164`, `#x-10`).
+  - Signed or unsigned decimal (`0`, `-42`, `1234567890123`), hexadecimal
+    (`#x73025164`, `#x-10`), binary (`#b101110111`, `#b-1011`) or octal
+    (`#o1637`, `#o-17`). A radix prefix takes an optional sign and at least
+    one digit of that radix; its letter and its digits are case-insensitive.
+    `#b` and `#o` have no floating-point form.
   - R7RS character literals are alternative integer syntax: `#\space` is `32`,
     `#\λ` is `#x3BB` (`955`), and `#\x1F600` is `128512`. Source text is
     UTF-8, and a literal represents one Unicode scalar value, not its UTF-8
@@ -57,7 +61,7 @@ MARV `.mvs` and `.mvh` files are sequences of S-expressions using a subset of R7
   - Supported escapes: `\n` (`0x0A`), `\t` (`0x09`), `\r` (`0x0D`), `\\`, `\"`, and R7RS hex escapes `\x<hex>;` (e.g. `\x00;`, `\x41;`). There is no other escape form, so a byte
     without an escape of its own is written `\x<hex>;`.
 - **Bytevector Literals:**
-  - `#u8(<byte> ...)`, with decimal or hexadecimal byte values, is accepted wherever a string literal is, which in practice means inside a `(data ...)` segment: `#u8(65 66 0)` and `"AB\x00;"` are the same three bytes. Character literals are not allowed as bytevector elements, even when their value is in `0..255`.
+  - `#u8(<byte> ...)`, with byte values in any of the integer notations above except a character literal, is accepted wherever a string literal is, which in practice means inside a `(data ...)` segment: `#u8(65 66 0)` and `"AB\x00;"` are the same three bytes. Character literals are not allowed as bytevector elements, even when their value is in `0..255`.
 
 ---
 

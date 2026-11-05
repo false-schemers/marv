@@ -405,6 +405,31 @@ static void sr_character(sread_t *pr, snode_t *pn)
   pn->ival = (long long)v;
 }
 
+/* #b and #o integers: an optional sign and at least one digit of the radix.
+ * Unlike #x there is no floating form, so a '.' or an exponent is simply not
+ * a digit and is reported as such.  Digits accumulate modulo 2^64 and the
+ * sign is applied last, exactly as #x does, so #b and #o reach the same
+ * values the hexadecimal and decimal forms can. */
+static void sr_radixnum(sread_t *pr, const char *s, int radix, snode_t *pn)
+{
+  unsigned long long mant;
+  const char *kind;
+  int i, d, neg, any;
+  kind = (radix == 2) ? "binary" : "octal";
+  mant = 0; i = 0; neg = 0; any = 0;
+  if (s[i] == '-') { neg = 1; i += 1; }
+  else if (s[i] == '+') i += 1;
+  for (; s[i] != '\0'; ++i) {
+    d = sr_hexval(s[i]);
+    if (d < 0 || d >= radix) sreprintf(pr, "malformed %s number: %s", kind, s);
+    mant = mant * (unsigned long long)radix + (unsigned long long)d;
+    any = 1;
+  }
+  if (any == 0) sreprintf(pr, "malformed %s number: %s", kind, s);
+  pn->nt = SN_INT;
+  pn->ival = (neg != 0) ? -(long long)mant : (long long)mant;
+}
+
 static void sr_atom(sread_t *pr, snode_t *pn, bool allow_character);
 
 /* #u8(...): each element is a byte, stored as written */
@@ -448,6 +473,8 @@ static void sr_atom(sread_t *pr, snode_t *pn, bool allow_character)
   s = (char*)bufdata(&pr->tok);
   if (s[0] == '#') {
     if (s[1] == 'x' || s[1] == 'X') { sr_hexnum(pr, s + 2, pn); return; }
+    if (s[1] == 'b' || s[1] == 'B') { sr_radixnum(pr, s + 2, 2, pn); return; }
+    if (s[1] == 'o' || s[1] == 'O') { sr_radixnum(pr, s + 2, 8, pn); return; }
     if (streql(s, "#u8")) {
       if (pr->ch != '(') sreprintf(pr, "'(' expected after #u8");
       sr_bvec(pr, pn);
@@ -2234,10 +2261,20 @@ static void u_temp(unst_t *pu, vt_t vt, opnd_t *po)
   pv->vt = vt;
 }
 
+/* A generated label carries the function's name, so that name goes through
+ * the same mangling as every other name a target has to spell: a MARV name
+ * is not required to be a C or assembler identifier, and $my-func used to
+ * reach the output verbatim, where the C compiler and the assembler each
+ * rejected the label it appeared in.  c_mangle drops the leading '$'. */
 static sym_t u_label(unst_t *pu, const char *prefix)
 {
+  cbuf_t nb;
   sym_t s;
-  s = internf("L_%s_%s_%d", symname(pu->fn->name) + 1, prefix, pu->fn->nlabel);
+  cbinit(&nb);
+  c_mangle(symname(pu->fn->name), &nb);
+  cbputc(0, &nb);
+  s = internf("L_%s_%s_%d", (const char *)cbdata(&nb), prefix, pu->fn->nlabel);
+  cbfini(&nb);
   pu->fn->nlabel += 1;
   return s;
 }

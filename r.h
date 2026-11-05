@@ -6,8 +6,9 @@
  *
  * Supported: line comments (;), lists, symbols, strings with \n \t \r \\ \" and
  * \xHH...; escapes, decimal and #x integers, decimal floats with exponents,
- * SRFI-270 hex floats (#x1.921fb54442d18p+1), R7RS character literals as
- * integer Unicode scalar values, and #u8(...) bytevectors of numeric bytes.
+ * SRFI-270 hex floats (#x1.921fb54442d18p+1), #b and #o integers, R7RS
+ * character literals as integer Unicode scalar values, and #u8(...)
+ * bytevectors of numeric bytes.
  *
  * A string escape names a Unicode character, so "\x09;" is one byte and
  * "\xe9;" is the two bytes of its utf-8 encoding. A data segment that needs
@@ -16,7 +17,7 @@
  *
  * Not supported, because no MARV input uses it: #| |# and #; comments, vectors,
  * booleans, quote/quasiquote, |bar| symbols, dotted pairs,
- * exactness and radix prefixes other than #x.
+ * exactness prefixes, and radix prefixes other than #x, #b and #o.
  */
 
 #pragma once
