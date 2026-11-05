@@ -57,3 +57,7 @@ dkms.conf
 # MARV build outputs
 /config.mk
 /marv
+
+# historical and temp files
+/work
+

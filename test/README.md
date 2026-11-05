@@ -2,7 +2,6 @@
 
 The `test/` directory contains the automated test suite for the MARV compiler, RV64G assembly simulator, standard library headers/adapters, and CLI driver:
 
-- `test/test.scm` — Historical Scheme implementation tests; not part of the root compiler suite.
 - `test/rv64-sim.scm` — R7RS RISC-V 64-bit (`RV64G` LP64D) assembly simulator used to verify register allocation, stack frames, tail calls, and standard library calls without requiring physical RISC-V hardware.
 - `test/rv64-sim-numbers.scm` — Tests for the standalone RV64 simulator’s byte and IEEE floating-point helpers.
 - `test/edge.mvs`, `test/edge.expected`, `test/edge-rv64.scm` — Instruction edge cases (shift-count masking, signed and unsigned division and remainder, `clz`/`ctz` of zero, sign extension, truncation, `nearest` ties-to-even, narrow loads with both sign extensions, `br_table` defaults). Each function returns one `i32`, so the `cc` build and the `rv64g` assembly can be compared with each other and with `test/edge.expected`, which holds what WebAssembly semantics require.

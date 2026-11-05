@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Driver optimization-option tests, independent of the historical src/ tree.
+# Driver optimization-option tests.
 set -euo pipefail
 MARV=${1:?usage: bash test/optimization.sh /path/to/marv}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

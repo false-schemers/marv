@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reader and backend regression tests, independent of the historical src tree.
+# Reader and backend regression tests.
 set -euo pipefail
 MARV=${1:?usage: bash test/characters.sh /path/to/marv}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
