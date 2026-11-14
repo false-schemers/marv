@@ -3461,7 +3461,20 @@ void rv_static(mod_t *pm, snode_t *pn, FILE *fp)
     dseg_read(pn, &ds, true);
     nrel = buflen(&ds.relocs);
     dn = mod_dataname(pm, snref(pn, 1)->sym);
-    fputs(ds.isconst ? "  .section .rodata\n" : "  .data\n", fp);
+    /* An all-zero item with no relocations is reserved in .bss rather
+     * than written out: .zero in .data occupies file space, while in a
+     * nobits section it only advances the location counter.  The C
+     * target gets this for free, because a zero-initialised array is
+     * .bss by the C rules, and the difference is not small -- a Scheme
+     * module declares its 64 MiB root array this way, which made a
+     * 290 KB program a 64 MB executable (data 67,111,776 against
+     * clang's 1,872 for the same module). [cco] */
+    if (ds.isconst)
+      fputs("  .section .rodata\n", fp);
+    else if (ds.allzero && nrel == 0 && buflen(&ds.bytes) > 0)
+      fputs("  .section .bss,\"aw\",@nobits\n", fp);
+    else
+      fputs("  .data\n", fp);
     if (ds.expname != NULL) fprintf(fp, "  .globl %s\n", symname(dn));
     fprintf(fp, "  .p2align %d\n", rv_p2(ds.align));
     fprintf(fp, "%s:\n", symname(dn));
