@@ -593,29 +593,6 @@ void flatten_file(const char *path, bool show)
 static int g_verbose;
 static const char *g_targdes = "";
 
-static void mvusage(FILE *fp)
-{
-  fprintf(fp, "usage: marv [-t TARGDES] [-c] [OPTION]... FILE...\n");
-  fprintf(fp, "  -t, --target=TARGDES   target description (default: cl on Windows, cc elsewhere)\n");
-  fprintf(fp, "  -T, --target-dir=DIR   add DIR to the .mvt lookup path\n");
-  fprintf(fp, "  -c, --compile          compile one .mvs file, do not link\n");
-  fprintf(fp, "      --split-funcs=N    in link mode on a cc target, cut the\n");
-  fprintf(fp, "                         generated C into pieces of at most N\n");
-  fprintf(fp, "                         functions (default 300; 0 does not cut)\n");
-  fprintf(fp, "  -o, --output=FILE      output file; required unless -c is given\n");
-  fprintf(fp, "  -O LEVEL               override target optimization level (0, 1, 2, or 3)\n");
-  fprintf(fp, "  -L, --system-dir=DIR   add DIR to the system .mvh and .c lookup path\n");
-  fprintf(fp, "  -I, --include-dir=DIR  add DIR to the local .mvh lookup path\n");
-  fprintf(fp, "  -v, --verbose          print each step before running it\n");
-  fprintf(fp, "  -n, --dry-run          print the commands instead of running them\n");
-  fprintf(fp, "  -M, --makefile-dir=DIR package the build and makefile in DIR\n");
-  fprintf(fp, "  -h, --help             print this\n");
-  fprintf(fp, "      --count            report what syntax the inputs contain\n");
-  fprintf(fp, "      --write            read every form and write it back out\n");
-  fprintf(fp, "      --stream           stream module members one at a time\n");
-  fprintf(fp, "      --3ac              flatten to three-address code\n");
-  fprintf(fp, "      --3ac-write        flatten and list the code\n");
-}
 
 static bool has_suffix(const char *s, const char *sfx)
 {
@@ -1517,9 +1494,51 @@ static bool make_package(tgt_t *pt, const char *dir, const char *outfile,
   return ok;
 }
 
+/* -h and --help answer on standard output and succeed, which is what a
+ * request for help deserves; eusage prints the same text to standard error
+ * and exits 1, which is what a mistake deserves.  Both read one stored
+ * string, so they cannot drift apart. */
+static void mvhelp(void)
+{
+  fprintf(stdout, "usage: %s %s\n", progname(), usage());
+}
+
+/* -O LEVEL and --optimize=LEVEL: a target description carries an
+ * optimization level and this overrides it, so the spelling is checked
+ * rather than passed through.  WHAT is the option as it was written, so
+ * that the complaint names the one the caller used. */
+static void set_optlevel(const char *what, const char *val)
+{
+  if (val[0] < '0' || val[0] > '3' || val[1] != 0)
+    eusage("%s takes 0, 1, 2, or 3, not %s", what, val);
+  g_optlevel = val[0] - '0';
+}
+
+/* -K N and --split-funcs=N */
+static void set_split(const char *what, const char *val)
+{
+  char *end;
+  long n;
+  n = strtol(val, &end, 10);
+  if (end == val || *end != 0 || n < 0)
+    eusage("%s takes a count, not %s", what, val);
+  g_split = n;
+}
+
+/* the long options that take a value, for the sake of the diagnostic */
+/* Spelled out rather than walked over a table: WCPL takes no block-level
+ * static declarations, and this program must compile under it. */
+static bool long_wants_arg(const char *name)
+{
+  return streql(name, "target") || streql(name, "target-dir")
+      || streql(name, "output") || streql(name, "system-dir")
+      || streql(name, "include-dir") || streql(name, "makefile-dir")
+      || streql(name, "split-funcs") || streql(name, "optimize");
+}
+
 int main(int argc, char **argv)
 {
-  int i, dflag;
+  int i, opt, dflag;
   const char *targdes;
   const char *outfile;
   const char *make_dir;
@@ -1531,117 +1550,90 @@ int main(int argc, char **argv)
   snode_t nd;
 
   setprogname("marv");
+  setusage
+    ("[-t TARGDES] [-c] [OPTION]... FILE...\n"
+     "  -t, --target=TARGDES   target description (default: cl on Windows, cc elsewhere)\n"
+     "  -T, --target-dir=DIR   add DIR to the .mvt lookup path\n"
+     "  -c, --compile          compile one .mvs file, do not link\n"
+     "  -K, --split-funcs=N    in link mode on a cc target, cut the\n"
+     "                         generated C into pieces of at most N\n"
+     "                         functions (default 300; 0 does not cut)\n"
+     "  -o, --output=FILE      output file; required unless -c is given\n"
+     "  -O, --optimize=LEVEL   override target optimization level (0, 1, 2, or 3)\n"
+     "  -L, --system-dir=DIR   add DIR to the system .mvh and .c lookup path\n"
+     "  -I, --include-dir=DIR  add DIR to the local .mvh lookup path\n"
+     "  -v, --verbose          print each step before running it\n"
+     "  -n, --dry-run          print the commands instead of running them\n"
+     "  -M, --makefile-dir=DIR package the build and makefile in DIR\n"
+     "  -h, --help             print this\n"
+     "      --count            report what syntax the inputs contain\n"
+     "      --write            read every form and write it back out\n"
+     "      --stream           stream module members one at a time\n"
+     "      --3ac              flatten to three-address code\n"
+     "      --3ac-write        flatten and list the code");
   init_instrs();
   dirs_init();
   targdes = NULL; outfile = NULL; make_dir = NULL; conly = false; dflag = 0;
 
-  for (i = 1; i < argc; ++i) {
-    const char *s;
-    s = argv[i];
-    if (s[0] != '-' || s[1] == '\0') break;
-    if (streql(s, "--")) { i += 1; break; }
-    if (streql(s, "-c") || streql(s, "--compile")) { conly = true; continue; }
-    if (streql(s, "-v") || streql(s, "--verbose")) { g_verbose = 1; continue; }
-    if (streql(s, "-n") || streql(s, "--dry-run")) { g_dryrun = 1; continue; }
-    if (streql(s, "-h") || streql(s, "--help")) { mvusage(stdout); return 0; }
-    if (streql(s, "--count")) { dflag = 1; continue; }
-    if (streql(s, "--write")) { dflag = 2; continue; }
-    if (streql(s, "--stream")) { dflag = 3; continue; }
-    if (streql(s, "--3ac")) { dflag = 4; continue; }
-    if (streql(s, "--3ac-write")) { dflag = 5; continue; }
-    {
-      const char *val;
-      char opt;
-      opt = 0;
-      val = NULL;
-      if (s[1] == '-') {                /* --name=VALUE or --name VALUE */
-        const char *eq;
-        size_t n;
-        eq = strchr(s, '=');
-        n = (eq != NULL) ? (size_t)(eq - s) : strlen(s);
-        if (n == 8 && strncmp(s, "--target", 8) == 0) opt = 't';
-        else if (n == 12 && strncmp(s, "--target-dir", 12) == 0) opt = 'T';
-        else if (n == 8 && strncmp(s, "--output", 8) == 0) opt = 'o';
-        else if (n == 12 && strncmp(s, "--system-dir", 12) == 0) opt = 'L';
-        else if (n == 13 && strncmp(s, "--include-dir", 13) == 0) opt = 'I';
-        else if (n == 13 && strncmp(s, "--split-funcs", 13) == 0) opt = 'S';
-        else if (n == 14 && strncmp(s, "--makefile-dir", 14) == 0) opt = 'M';
-        if (opt != 0) {
-          if (eq != NULL) val = eq + 1;
-          else if (i + 1 < argc) { i += 1; val = argv[i]; }
-          else {
-            fprintf(stderr, "marv: %s needs an argument\n", s);
-            return 2;
-          }
-        }
-      } else {              /* short flags cluster, and the last may take a value */
-        size_t k;
-        bool bad;
-        bad = false;
-        for (k = 1; s[k] != '\0'; ++k) {
-          char c2;
-          c2 = s[k];
-          if (c2 == 'c') { conly = true; continue; }
-          if (c2 == 'v') { g_verbose = 1; continue; }
-          if (c2 == 'n') { g_dryrun = 1; continue; }
-          if (c2 == 't' || c2 == 'T' || c2 == 'o' || c2 == 'L' || c2 == 'I' || c2 == 'O' || c2 == 'M') {
-            opt = c2;
-            if (s[k + 1] != '\0') val = s + k + 1;      /* -tcc */
-            else if (i + 1 < argc) { i += 1; val = argv[i]; }   /* -t cc */
-            else {
-              fprintf(stderr, "marv: -%c needs an argument\n", c2);
-              return 2;
-            }
-            break;
-          }
-          bad = true;
-          break;
-        }
-        if (bad) {
-          fprintf(stderr, "marv: unknown option %s\n\n", s);
-          mvusage(stderr);
-          return 2;
-        }
-        if (opt == 0) continue;         /* the cluster was all flags */
-      }
-      if (opt == 0 || val == NULL) {
-        fprintf(stderr, "marv: unknown option %s\n\n", s);
-        mvusage(stderr);
-        return 2;
-      }
-      if (opt == 't') targdes = val;
-      else if (opt == 'o') outfile = val;
-      else if (opt == 'M') make_dir = val;
-      else if (opt == 'O') {
-        if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
-          fprintf(stderr, "marv: -O takes 0, 1, 2, or 3, not %s\n", val);
-          return 2;
-        }
-        g_optlevel = val[0] - '0';
-      }
-      else if (opt == 'T') dirs_add(&g_tdirs, val);
-      else if (opt == 'L') dirs_add(&g_ldirs, val);
-      else if (opt == 'S') {
-        char *end;
-        long n2;
-        n2 = strtol(val, &end, 10);
-        if (end == val || *end != '\0' || n2 < 0) {
-          fprintf(stderr, "marv: --split-funcs takes a count, not %s\n", val);
-          return 2;
-        }
-        g_split = n2;
-      }
-      else dirs_add(&g_idirs, val);
+  /* egetopt is the one option parser in this program and in its sister
+   * programs, so every tool here answers to the same shapes: clustered
+   * short flags, an option argument attached or separate, long options
+   * spelled --name=VALUE, and -- ending the options.  A long option is an
+   * option-with-argument named -, which is what the trailing -: in the
+   * spec below declares, so --target=cc arrives as eoptarg "target=cc".
+   * [cco] */
+  while ((opt = egetopt(argc, argv, "cvnhK:t:T:o:L:I:O:M:-:")) != EOF) {
+    switch (opt) {
+      case 'c': conly = true; break;
+      case 'v': g_verbose = 1; break;
+      case 'n': g_dryrun = 1; break;
+      case 'h': mvhelp(); return 0;
+      case 't': targdes = eoptarg; break;
+      case 'o': outfile = eoptarg; break;
+      case 'M': make_dir = eoptarg; break;
+      case 'T': dirs_add(&g_tdirs, eoptarg); break;
+      case 'L': dirs_add(&g_ldirs, eoptarg); break;
+      case 'I': dirs_add(&g_idirs, eoptarg); break;
+      case 'O': set_optlevel("-O", eoptarg); break;
+      case 'K': set_split("-K", eoptarg); break;
+      case '-': {
+        char *arg;
+        if (streql(eoptarg, "compile")) conly = true;
+        else if (streql(eoptarg, "verbose")) g_verbose = 1;
+        else if (streql(eoptarg, "dry-run")) g_dryrun = 1;
+        else if (streql(eoptarg, "help")) { mvhelp(); return 0; }
+        else if (streql(eoptarg, "count")) dflag = 1;
+        else if (streql(eoptarg, "write")) dflag = 2;
+        else if (streql(eoptarg, "stream")) dflag = 3;
+        else if (streql(eoptarg, "3ac")) dflag = 4;
+        else if (streql(eoptarg, "3ac-write")) dflag = 5;
+        else if ((arg = strprf(eoptarg, "target-dir=")) != NULL) dirs_add(&g_tdirs, arg);
+        else if ((arg = strprf(eoptarg, "target=")) != NULL) targdes = arg;
+        else if ((arg = strprf(eoptarg, "output=")) != NULL) outfile = arg;
+        else if ((arg = strprf(eoptarg, "system-dir=")) != NULL) dirs_add(&g_ldirs, arg);
+        else if ((arg = strprf(eoptarg, "include-dir=")) != NULL) dirs_add(&g_idirs, arg);
+        else if ((arg = strprf(eoptarg, "makefile-dir=")) != NULL) make_dir = arg;
+        else if ((arg = strprf(eoptarg, "split-funcs=")) != NULL) set_split("--split-funcs", arg);
+        else if ((arg = strprf(eoptarg, "optimize=")) != NULL) set_optlevel("--optimize", arg);
+        /* A long option carries its value with =, so a bare one that wants
+         * a value is a missing argument rather than an unknown option.  The
+         * message spells the form out, because the mistake someone makes
+         * here is writing --target cc, and being told the option is illegal
+         * would send them looking for the wrong thing. */
+        else if (long_wants_arg(eoptarg))
+          eusage("option --%s requires an argument, written --%s=VALUE",
+                 eoptarg, eoptarg);
+        else eusage("illegal option: --%s", eoptarg);
+      } break;
     }
   }
+  i = eoptind;                  /* the operands begin here */
 
   if (make_dir != NULL && (conly || g_dryrun || dflag != 0)) {
-    fprintf(stderr, "marv: -M cannot be combined with -c, -n, or a diagnostic mode\n");
-    return 2;
+    eusage("-M cannot be combined with -c, -n, or a diagnostic mode");
   }
   if (make_dir != NULL && make_dir[0] == 0) {
-    fprintf(stderr, "marv: -M requires a nonempty directory\n");
-    return 2;
+    eusage("-M requires a nonempty directory");
   }
   if (dflag != 0) {                 /* the diagnostic modes */
     if (dflag == 4 || dflag == 5) {
@@ -1680,9 +1672,7 @@ int main(int argc, char **argv)
 
   if (targdes == NULL) targdes = host_windows() ? "cl" : "cc";
   if (i >= argc) {
-    fprintf(stderr, "marv: no input files specified\n\n");
-    mvusage(stderr);
-    return 1;
+    eusage("no input files specified");
   }
 
   cbinit(&mvtpath);

@@ -19,18 +19,18 @@ marv [-t TARGDES] [-c] [OPTION]... FILE...
 | `-T` | `--target-dir=DIR` | `DIR` | Add `DIR` to the `.mvt` target description lookup path (default: `("target/" "<PREFIX>/target")` or `("target/" "targets/")`). |
 | `-c` | `--compile` | *(none)* | Compile one `.mvs` file into a target object file without linking. |
 | `-o` | `--output=FILE` | `FILE` | Output pathname (optional override in `-c` mode; required executable name when `-c` is omitted). |
-| `-O` | — | `0`, `1`, `2`, or `3` | Override optimization placeholders in the target compiler command (for example, `-O2` or `-O 2`). |
+| `-O` | `--optimize=LEVEL` | `0`, `1`, `2`, or `3` | Override optimization placeholders in the target compiler command (for example, `-O2`, `-O 2` or `--optimize=2`). |
 | `-L` | `--system-dir=DIR` | `DIR` | Add `DIR` to the system `.mvh` header and `.c` adapter lookup path (default: `("lib/" "<PREFIX>/lib")` or `("lib/" "libs/")`). |
 | `-I` | `--include-dir=DIR` | `DIR` | Add `DIR` to the project/local `.mvh` header lookup path (default: `("./")`). |
 | `-v` | `--verbose` | *(none)* | Print each compilation step line and the linker command line to `stderr` before executing. |
 | `-n` | `--dry-run` | *(none)* | Print the target command and cleanup commands instead of executing them. MARV still generates the temporary target files. |
 | `-M` | `--makefile-dir=DIR` | `DIR` | Generate a self-contained build directory with a makefile instead of running the backend compiler. |
 | `-h` | `--help` | *(none)* | Display command-line usage and options. |
-| | `--split-funcs=N` | `N` | In link mode on a `cc` target, cut the generated C into pieces of at most `N` function definitions, each compiled as its own translation unit (default `300`; `0` does not cut). One huge translation unit is what makes a host C compiler's memory grow on a large module. Ignored in `-c` mode, which always writes one file. |
+| `-K` | `--split-funcs=N` | `N` | In link mode on a `cc` target, cut the generated C into pieces of at most `N` function definitions, each compiled as its own translation unit (default `300`; `0` does not cut). One huge translation unit is what makes a host C compiler's memory grow on a large module. Ignored in `-c` mode, which always writes one file. |
 
 Diagnostic modes `--count`, `--write`, `--stream`, `--3ac`, and `--3ac-write` inspect source input instead of compiling it; see `marv --help`.
 
-Options follow standard POSIX syntax: short flags may be clustered (e.g. `-vc`), and option arguments may be passed either separately (`-t cc`, `-o app`) or attached (`-tcc`, `--target=cc`, `--output=app`).
+Options follow standard POSIX syntax: short flags may be clustered (e.g. `-vc`), and a short option argument may be passed either separately (`-t cc`, `-o app`) or attached (`-tcc`). A long option carries its argument with `=` (`--target=cc`, `--output=app`); `--target cc` is not accepted. A `--` argument ends the options, so a file whose name begins with `-` can be named after it.
 
 The WCPL/WASI build defaults to `cc`: WASI does not expose whether its host is
 Windows. Use `-t cl` explicitly when a WASI-hosted compiler should target MSVC.

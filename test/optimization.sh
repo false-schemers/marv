@@ -81,7 +81,8 @@ done
 if "$MARV" -O > "$work/log" 2>&1; then
   echo '[FAIL] accepted -O without an argument' >&2; exit 1
 fi
-grep -q -- 'marv: -O needs an argument' "$work/log"
+# egetopt words a missing option argument the same way in every tool here
+grep -q -- 'marv: option -O requires an argument' "$work/log"
 # WCPL compile-only output is unchanged by the ignored optimization option.
 "$MARV" -T target -t wcpl -c -o "$work/default.wo" test/grouped-locals.mvs
 "$MARV" -T target -t wcpl -O3 -c -o "$work/opt.wo" test/grouped-locals.mvs
