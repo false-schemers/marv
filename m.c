@@ -1720,12 +1720,74 @@ void eoptreset(void)
   eoptich = 0;
 }
 
+/* Long options are parsed outside egetopt, which knows only that -- takes
+ * an argument: for --target=cc it hands over "target=cc", and for
+ * --target cc it hands over "target" with eoptind left on "cc".  long_opt
+ * hides that difference, so a caller writes one line per option and accepts
+ * both spellings.
+ *
+ * LOPT is the option name, with a trailing = when it takes a value.  A match
+ * returns true, sets elongopt to the option as it would be written, and for
+ * a value-taking option leaves the value in eoptarg -- from after the = or
+ * from the next argument, whichever the caller used.  A value-taking option
+ * with nothing to take is a usage error and is reported here rather than
+ * left to the caller, which is why no caller needs a list of which options
+ * take values.
+ *
+ * A name that is a prefix of another is not a hazard: --target-dir=x fails
+ * long_opt("target=") because the character after the name is neither = nor
+ * the end, so the order of the tests does not matter. [cco] */
+
+const char *elongopt = NULL;
+static char g_elongbuf[64];
+static int g_eargc = 0;
+static char **g_eargv = NULL;
+
+static void set_elongopt(const char *lopt, size_t n)
+{
+  if (n + 3 > sizeof(g_elongbuf)) n = sizeof(g_elongbuf) - 3;
+  g_elongbuf[0] = g_elongbuf[1] = (char)45;   /* a hyphen, twice */
+  memcpy(g_elongbuf + 2, lopt, n);
+  g_elongbuf[n + 2] = 0;
+  elongopt = g_elongbuf;
+}
+
+bool long_opt(const char *lopt)
+{
+  size_t n;
+  bool wantsarg;
+  assert(lopt); assert(eoptarg);
+  n = strlen(lopt);
+  wantsarg = (n > 0 && lopt[n-1] == '=');
+  if (wantsarg) --n;
+  if (strncmp(eoptarg, lopt, n) != 0) return false;
+  if (!wantsarg) {
+    if (eoptarg[n] != 0) return false;
+    set_elongopt(lopt, n);
+    return true;
+  }
+  if (eoptarg[n] == '=') {
+    set_elongopt(lopt, n);
+    eoptarg = eoptarg + n + 1;
+    return true;
+  }
+  if (eoptarg[n] != 0) return false;      /* a longer name, not this one */
+  set_elongopt(lopt, n);
+  if (eoptind >= g_eargc)
+    eusage("option %s requires an argument", elongopt);
+  eoptarg = g_eargv[eoptind++];
+  return true;
+}
+
 int egetopt(int argc, char* argv[], const char* opts)
 {
   int c; char *popt;
 
   /* set the name of the program if it isn't done already */
   if (progname() == NULL) setprogname(argv[0]);
+
+  /* long_opt needs these to reach a separated option argument */
+  g_eargc = argc; g_eargv = argv;
 
   /* check if it's time to stop */
   if (eoptich == 0) { 

@@ -44,6 +44,8 @@ extern  void  vvverbosef(const char *fmt, ...);
 extern  int   eoptind, eopterr, eoptopt, eoptich;
 extern  char  *eoptarg;
 extern  int   egetopt(int argc, char* argv[], const char* opts);
+extern  const char *elongopt;   /* the last option long_opt matched */
+extern  bool  long_opt(const char *lopt);
 extern  void  eoptreset(void); /* reset getopt globals */
 
 /* common utility functions */

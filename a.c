@@ -1526,16 +1526,6 @@ static void set_split(const char *what, const char *val)
 }
 
 /* the long options that take a value, for the sake of the diagnostic */
-/* Spelled out rather than walked over a table: WCPL takes no block-level
- * static declarations, and this program must compile under it. */
-static bool long_wants_arg(const char *name)
-{
-  return streql(name, "target") || streql(name, "target-dir")
-      || streql(name, "output") || streql(name, "system-dir")
-      || streql(name, "include-dir") || streql(name, "makefile-dir")
-      || streql(name, "split-funcs") || streql(name, "optimize");
-}
-
 int main(int argc, char **argv)
 {
   int i, opt, dflag;
@@ -1597,32 +1587,26 @@ int main(int argc, char **argv)
       case 'O': set_optlevel("-O", eoptarg); break;
       case 'K': set_split("-K", eoptarg); break;
       case '-': {
-        char *arg;
-        if (streql(eoptarg, "compile")) conly = true;
-        else if (streql(eoptarg, "verbose")) g_verbose = 1;
-        else if (streql(eoptarg, "dry-run")) g_dryrun = 1;
-        else if (streql(eoptarg, "help")) { mvhelp(); return 0; }
-        else if (streql(eoptarg, "count")) dflag = 1;
-        else if (streql(eoptarg, "write")) dflag = 2;
-        else if (streql(eoptarg, "stream")) dflag = 3;
-        else if (streql(eoptarg, "3ac")) dflag = 4;
-        else if (streql(eoptarg, "3ac-write")) dflag = 5;
-        else if ((arg = strprf(eoptarg, "target-dir=")) != NULL) dirs_add(&g_tdirs, arg);
-        else if ((arg = strprf(eoptarg, "target=")) != NULL) targdes = arg;
-        else if ((arg = strprf(eoptarg, "output=")) != NULL) outfile = arg;
-        else if ((arg = strprf(eoptarg, "system-dir=")) != NULL) dirs_add(&g_ldirs, arg);
-        else if ((arg = strprf(eoptarg, "include-dir=")) != NULL) dirs_add(&g_idirs, arg);
-        else if ((arg = strprf(eoptarg, "makefile-dir=")) != NULL) make_dir = arg;
-        else if ((arg = strprf(eoptarg, "split-funcs=")) != NULL) set_split("--split-funcs", arg);
-        else if ((arg = strprf(eoptarg, "optimize=")) != NULL) set_optlevel("--optimize", arg);
-        /* A long option carries its value with =, so a bare one that wants
-         * a value is a missing argument rather than an unknown option.  The
-         * message spells the form out, because the mistake someone makes
-         * here is writing --target cc, and being told the option is illegal
-         * would send them looking for the wrong thing. */
-        else if (long_wants_arg(eoptarg))
-          eusage("option --%s requires an argument, written --%s=VALUE",
-                 eoptarg, eoptarg);
+        /* long_opt takes the name, with a trailing = where a value follows,
+         * and accepts both --name=VALUE and --name VALUE; the value arrives
+         * in eoptarg and the option as written in elongopt. */
+        if (long_opt("compile")) conly = true;
+        else if (long_opt("verbose")) g_verbose = 1;
+        else if (long_opt("dry-run")) g_dryrun = 1;
+        else if (long_opt("help")) { mvhelp(); return 0; }
+        else if (long_opt("count")) dflag = 1;
+        else if (long_opt("write")) dflag = 2;
+        else if (long_opt("stream")) dflag = 3;
+        else if (long_opt("3ac")) dflag = 4;
+        else if (long_opt("3ac-write")) dflag = 5;
+        else if (long_opt("target-dir=")) dirs_add(&g_tdirs, eoptarg);
+        else if (long_opt("target=")) targdes = eoptarg;
+        else if (long_opt("output=")) outfile = eoptarg;
+        else if (long_opt("system-dir=")) dirs_add(&g_ldirs, eoptarg);
+        else if (long_opt("include-dir=")) dirs_add(&g_idirs, eoptarg);
+        else if (long_opt("makefile-dir=")) make_dir = eoptarg;
+        else if (long_opt("split-funcs=")) set_split(elongopt, eoptarg);
+        else if (long_opt("optimize=")) set_optlevel(elongopt, eoptarg);
         else eusage("illegal option: --%s", eoptarg);
       } break;
     }

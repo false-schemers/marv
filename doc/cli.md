@@ -30,7 +30,7 @@ marv [-t TARGDES] [-c] [OPTION]... FILE...
 
 Diagnostic modes `--count`, `--write`, `--stream`, `--3ac`, and `--3ac-write` inspect source input instead of compiling it; see `marv --help`.
 
-Options follow standard POSIX syntax: short flags may be clustered (e.g. `-vc`), and a short option argument may be passed either separately (`-t cc`, `-o app`) or attached (`-tcc`). A long option carries its argument with `=` (`--target=cc`, `--output=app`); `--target cc` is not accepted. A `--` argument ends the options, so a file whose name begins with `-` can be named after it.
+Options follow standard POSIX syntax: short flags may be clustered (e.g. `-vc`), and a short option argument may be passed either separately (`-t cc`, `-o app`) or attached (`-tcc`). A long option takes its argument either joined with `=` (`--target=cc`, `--output=app`) or as the next argument (`--target cc`). A `--` argument ends the options, so a file whose name begins with `-` can be named after it.
 
 The WCPL/WASI build defaults to `cc`: WASI does not expose whether its host is
 Windows. Use `-t cl` explicitly when a WASI-hosted compiler should target MSVC.
