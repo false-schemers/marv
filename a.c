@@ -1533,6 +1533,7 @@ static bool make_package(tgt_t *pt, const char *dir, const char *outfile,
  * string, so they cannot drift apart. */
 static void mvhelp(void)
 {
+  fprintf(stdout, "MARV Portable Assembler\n");
   fprintf(stdout, "usage: %s %s\n", progname(), usage());
 }
 
@@ -1576,26 +1577,31 @@ int main(int argc, char **argv)
   setprogname("marv");
   setusage
     ("[-t TARGDES] [-c] [OPTION]... FILE...\n"
-     "  -t, --target=TARGDES   target description (default: cl on Windows, cc elsewhere)\n"
-     "  -T, --target-dir=DIR   add DIR to the .mvt lookup path\n"
-     "  -c, --compile          compile one .mvs file, do not link\n"
-     "  -K, --split-funcs=N    in link mode on a cc target, cut the\n"
-     "                         generated C into pieces of at most N\n"
-     "                         functions (default 300, or 0 with -O3\n"
-     "                         unless the target is cl; 0 does not cut)\n"
-     "  -o, --output=FILE      output file; required unless -c is given\n"
-     "  -O, --optimize=LEVEL   override the target level (0..3; cl stops at 2)\n"
-     "  -L, --system-dir=DIR   add DIR to the system .mvh and .c lookup path\n"
-     "  -I, --include-dir=DIR  add DIR to the local .mvh lookup path\n"
-     "  -v, --verbose          print each step before running it\n"
-     "  -n, --dry-run          print the commands instead of running them\n"
-     "  -M, --makefile-dir=DIR package the build and makefile in DIR\n"
-     "  -h, --help             print this\n"
-     "      --count            report what syntax the inputs contain\n"
-     "      --write            read every form and write it back out\n"
-     "      --stream           stream module members one at a time\n"
-     "      --3ac              flatten to three-address code\n"
-     "      --3ac-write        flatten and list the code");
+     "\n"
+     "Options:\n"
+     "  -t, --target=TARGDES   Target description (default: cl on Windows, cc elsewhere)\n"
+     "  -T, --target-dir=DIR   Add DIR to the .mvt lookup path\n"
+     "  -c, --compile          Compile one .mvs file, do not link\n"
+     "  -o, --output=FILE      Output file; required unless -c is given\n"
+     "  -O, --optimize=LEVEL   Override the target level (0..3; cl stops at 2)\n"
+     "  -L, --system-dir=DIR   Add DIR to the system .mvh and .c lookup path\n"
+     "  -I, --include-dir=DIR  Add DIR to the local .mvh lookup path\n"
+     "  -K, --split-funcs=N    In link mode on a cc target, cut the generated C\n"
+     "                         into pieces of at most N functions (default 300,\n"
+     "                         or 0 with -O3 unless the target is cl; 0 does not cut)\n"
+     "  -v, --verbose          Print each step before running it\n"
+     "  -n, --dry-run          Print the commands instead of running them\n"
+     "  -M, --makefile-dir=DIR Package the build and makefile in DIR\n"
+     "  -h, --help             Display this help\n"
+     "\n"
+     "Diagnostic modes:\n"
+     "      --count            Report what syntax the inputs contain\n"
+     "      --write            Read every form and write it back out\n"
+     "      --stream           Stream module members one at a time\n"
+     "      --3ac              Flatten to three-address code\n"
+     "      --3ac-write        Flatten and list the code\n"
+     "\n"
+     "'--' ends options processing. FILE is a MARV module source (.mvs)");
   init_instrs();
   dirs_init();
   targdes = NULL; outfile = NULL; make_dir = NULL; conly = false; dflag = 0;
