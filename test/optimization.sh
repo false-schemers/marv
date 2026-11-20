@@ -55,14 +55,18 @@ for target in cc gcc clang cl rv64g rv64g-cross; do
   case " $default " in *' -O2 '*) :;; *) echo "[FAIL] $target default: $default" >&2; exit 1;; esac
   case " $override " in *' -O1 '*) :;; *) echo "[FAIL] $target override: $override" >&2; exit 1;; esac
 done
-# MSVC receives the exact substitution, on both copies of the target file.
-# This checks MARV's command only; MSVC does not support every emitted level.
+# MSVC receives the substitution saturated at 2, on both copies of the target
+# file: there is no /O3, and cl answers an unknown /O letter with a warning
+# and the default, so passing 3 through would compile SLOWER than asking for
+# 2.  This checks MARV's command only.
 for description in target/cl.mvt targets/cl.mvt; do
   [ -f "$description" ] || continue
-  for level in 0 1 2 3; do
+  for level in 0 1 2; do
     expect "cl /nologo -O$level /Fe:$work/out $work/input.c" \
       "$("$MARV" -n -t "$ROOT/$description" -O"$level" -o "$work/out" "$work/input.c")"
   done
+  expect "cl /nologo -O2 /Fe:$work/out $work/input.c" \
+    "$("$MARV" -n -t "$ROOT/$description" -O3 -o "$work/out" "$work/input.c")"
   expect "cl /nologo -O2 /Fe:$work/out $work/input.c" \
     "$("$MARV" -n -t "$ROOT/$description" -o "$work/out" "$work/input.c")"
 done
@@ -95,4 +99,29 @@ for level in 0 1 2 3; do
   "$MARV" -T target -t cc -O"$level" -o "$work/prog" test/grouped-locals.mvs
   "$work/prog"
 done
+# -O3 on a non-cl cc target turns the splitting off unless -K says otherwise:
+# the split walls each piece off from the inliner, which is the wrong trade
+# at the level that asks for every optimization.  cl is exempt because it
+# inlines across translation units.  Needs a module with more functions than
+# the default split of 300, so the counts can differ.
+pieces() {   # $1 = target, rest = options
+  local t="$1"; shift
+  "$MARV" -n -T target -t "$t" "$@" -o "$work/out" "$work/many.mvs" \
+    | head -1 | grep -oE 'marv_[0-9]+_[0-9]+\.c' | wc -l | tr -d ' '
+}
+{
+  echo "(module \$manyfuncs"
+  i=0
+  while [ "$i" -lt 400 ]; do
+    echo "  (func \$f$i (result i32) (return (i32.const $i)))"
+    i=$((i+1))
+  done
+  echo "  (func \$main (export \"main\") (result i32) (return (i32.const 0)))"
+  echo ")"
+} > "$work/many.mvs"
+expect 2 "$(pieces cc)"                 # 401 functions, default split 300
+expect 1 "$(pieces cc -O3)"             # -O3 implies no split
+expect 2 "$(pieces cc -O3 -K300)"       # an explicit -K wins
+expect 5 "$(pieces cc -O3 -K100)"       # and is honoured exactly
+expect 2 "$(pieces cl -O3)"             # cl inlines across units: unchanged
 echo '[PASS] -O defaults, overrides, fallback flags, targets and diagnostics'

@@ -211,13 +211,24 @@ const char *tt_comment(tt_t t)
 /* -1 means the target's default; otherwise the requested optimization level. */
 static int g_optlevel = -1;
 
-/* Copy one template item, replacing ~O0 through ~O3 with a compiler option. */
+/* Set once the target description is in hand: its compiler is cl, which has
+ * no /O3.  MSVC treats an unknown /O letter as a warning and carries on, so
+ * passing 3 through would quietly compile at the default instead of at the
+ * highest level the compiler has.  Three saturates to two. */
+static bool g_opt_cl = false;
+
+/* Copy one template item, replacing ~O0 through ~O3 with a compiler option.
+ * The level is the one -O asked for, or the template's own digit when -O was
+ * not given; either way a cl target saturates at 2. */
 static size_t put_opt_template(cbuf_t *out, const char *s)
 {
   if (s[0] == '~' && s[1] == 'O' && s[2] >= '0' && s[2] <= '3') {
+    int lvl;
+    lvl = (g_optlevel < 0) ? s[2] - '0' : g_optlevel;
+    if (g_opt_cl && lvl > 2) lvl = 2;
     cbputc('-', out);
     cbputc('O', out);
-    cbputc(g_optlevel < 0 ? s[2] : '0' + g_optlevel, out);
+    cbputc((char)('0' + lvl), out);
     return 3;
   }
   cbputc(*s, out);
@@ -784,6 +795,7 @@ static void adapters_of_object(const char *path, buf_t *pcs)
  */
 
 static long g_split = 300;      /* 0 turns the splitting off */
+static bool g_split_given = false;   /* -K or --split-funcs was passed */
 
 /* a line that opens a definition rather than declaring or directing */
 static bool split_opens(const char *l, const char *next)
@@ -1328,6 +1340,27 @@ static bool make_is_cl(tgt_t *pt)
   return streql(cc, "cl") || streql(cc, "cl.exe") || streql(cc, "CL") || streql(cc, "CL.EXE");
 }
 
+/* -O and -K both mean something only against a particular backend, so
+ * they are settled here, once the target description has been read.
+ *
+ * Two decisions.  A cl target saturates the level at 2, because MSVC has
+ * no /O3; put_opt_template does that part.  And asking a non-cl cc target
+ * for -O3 without saying anything about -K turns the splitting off: the
+ * split exists to keep one huge translation unit from exhausting a host
+ * compiler, and it also walls each piece off from the inliner, so at the
+ * level where someone is asking for every optimization the wall is the
+ * wrong trade.  cl is left alone here because it can inline across
+ * translation units, so splitting costs it nothing.
+ *
+ * An explicit -K always wins, which is why set_split records that it was
+ * given rather than comparing against the default -- -K300 means the
+ * caller chose 300. [cco] */
+static void settle_backend_options(tgt_t *pt)
+{
+  g_opt_cl = make_is_cl(pt);
+  if (!g_opt_cl && g_optlevel == 3 && !g_split_given) g_split = 0;
+}
+
 static void make_target_name(FILE *fp, const char *name, bool nmake)
 {
   const char *p;
@@ -1523,6 +1556,7 @@ static void set_split(const char *what, const char *val)
   if (end == val || *end != 0 || n < 0)
     eusage("%s takes a count, not %s", what, val);
   g_split = n;
+  g_split_given = true;
 }
 
 /* the long options that take a value, for the sake of the diagnostic */
@@ -1547,9 +1581,10 @@ int main(int argc, char **argv)
      "  -c, --compile          compile one .mvs file, do not link\n"
      "  -K, --split-funcs=N    in link mode on a cc target, cut the\n"
      "                         generated C into pieces of at most N\n"
-     "                         functions (default 300; 0 does not cut)\n"
+     "                         functions (default 300, or 0 with -O3\n"
+     "                         unless the target is cl; 0 does not cut)\n"
      "  -o, --output=FILE      output file; required unless -c is given\n"
-     "  -O, --optimize=LEVEL   override target optimization level (0, 1, 2, or 3)\n"
+     "  -O, --optimize=LEVEL   override the target level (0..3; cl stops at 2)\n"
      "  -L, --system-dir=DIR   add DIR to the system .mvh and .c lookup path\n"
      "  -I, --include-dir=DIR  add DIR to the local .mvh lookup path\n"
      "  -v, --verbose          print each step before running it\n"
@@ -1670,6 +1705,7 @@ int main(int argc, char **argv)
   g_targdes = targdes;
   load_mvt((const char *)cbdata(&mvtpath), &tgt);
   cbfini(&mvtpath);
+  settle_backend_options(&tgt);
 
   if (conly) {
     const char *src;
