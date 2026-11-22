@@ -826,7 +826,7 @@ vt_t vt_of_sym(sym_t s)
 void mod_init(mod_t *pm)
 {
   memset(pm, 0, sizeof(mod_t));
-  bufinit(&pm->sigs, sizeof(sig_t));
+  bufinit(&pm->sigs, sizeof(msig_t));
   bufinit(&pm->globals, sizeof(glb_t));
   bufinit(&pm->consts, sizeof(cst_t));
   bufinit(&pm->records, sizeof(rec_t));
@@ -839,7 +839,7 @@ void mod_fini(mod_t *pm)
 {
   size_t i;
   for (i = 0; i < buflen(&pm->sigs); ++i)
-    buffini(&((sig_t *)bufref(&pm->sigs, i))->ptypes);
+    buffini(&((msig_t *)bufref(&pm->sigs, i))->ptypes);
   for (i = 0; i < buflen(&pm->consts); ++i)
     snfini(&((cst_t *)bufref(&pm->consts, i))->val);
   buffini(&pm->sigs);
@@ -860,14 +860,14 @@ void mod_fini(mod_t *pm)
   buffini(&pm->tramps);
 }
 
-sig_t *mod_sig(mod_t *pm, sym_t name)
+msig_t *mod_sig(mod_t *pm, sym_t name)
 {
   size_t i;
-  sig_t *first;
+  msig_t *first;
   first = NULL;
   for (i = 0; i < buflen(&pm->sigs); ++i) {
-    sig_t *ps;
-    ps = (sig_t *)bufref(&pm->sigs, i);
+    msig_t *ps;
+    ps = (msig_t *)bufref(&pm->sigs, i);
     if (ps->name != name) continue;
     if (ps->local) return ps;         /* ours shadows an interface's */
     if (first == NULL) first = ps;
@@ -913,7 +913,7 @@ static char sig_letter(vt_t vt)
   return 'v';
 }
 
-sym_t sig_letters(sig_t *ps)
+sym_t sig_letters(msig_t *ps)
 {
   cbuf_t cb;
   size_t i;
@@ -1040,8 +1040,8 @@ static void cname_check(mod_t *pm, snode_t *pn, sym_t name, sym_t cname)
   size_t i;
   if (cname == 0) return;
   for (i = 0; i < buflen(&pm->sigs); ++i) {
-    sig_t *ps;
-    ps = (sig_t *)bufref(&pm->sigs, i);
+    msig_t *ps;
+    ps = (msig_t *)bufref(&pm->sigs, i);
     if (ps->cname == cname && ps->name != name && !same_thing(ps->name, name))
       sneprintf(pn, "%s and %s both name the C function %s",
                 symname(ps->name), symname(name), symname(cname));
@@ -1552,11 +1552,11 @@ static sym_t g_ifmod;
 static void declare_func(mod_t *pm, snode_t *pn)
 {
   size_t i;
-  sig_t *ps;
+  msig_t *ps;
   bool retrec, variadic;
   if (snlen(pn) < 2 || snref(pn, 1)->nt != SN_SYM) return;
-  ps = (sig_t *)bufnewbk(&pm->sigs);
-  memset(ps, 0, sizeof(sig_t));
+  ps = (msig_t *)bufnewbk(&pm->sigs);
+  memset(ps, 0, sizeof(msig_t));
   bufinit(&ps->ptypes, sizeof(vt_t));
   ps->name = snref(pn, 1)->sym;
   ps->res = VT_VOID;
@@ -1644,17 +1644,17 @@ void mod_reset_fresh(void) { g_mxno = 0; }
 
 static void alias_last_sig(mod_t *pm)
 {
-  sig_t *ps; sig_t *pa;
+  msig_t *ps; msig_t *pa;
   size_t i, n;
   const char *in; const char *fn;
   if (g_iface == 0 || buflen(&pm->sigs) == 0) return;
-  ps = (sig_t *)bufref(&pm->sigs, buflen(&pm->sigs) - 1);
+  ps = (msig_t *)bufref(&pm->sigs, buflen(&pm->sigs) - 1);
   in = symname(g_iface); fn = symname(ps->name);
   if (in[0] == '$') in += 1;
   if (fn[0] == '$') fn += 1;
-  pa = (sig_t *)bufnewbk(&pm->sigs);
-  ps = (sig_t *)bufref(&pm->sigs, buflen(&pm->sigs) - 2);   /* may have moved */
-  memset(pa, 0, sizeof(sig_t));
+  pa = (msig_t *)bufnewbk(&pm->sigs);
+  ps = (msig_t *)bufref(&pm->sigs, buflen(&pm->sigs) - 2);   /* may have moved */
+  memset(pa, 0, sizeof(msig_t));
   bufinit(&pa->ptypes, sizeof(vt_t));
   pa->name = internf("$%s:%s", in, fn);
   pa->res = ps->res;
@@ -1696,11 +1696,11 @@ void mod_declare(mod_t *pm, snode_t *pn)
     declare_func(pm, pn);
     alias_last_sig(pm);
     if (streql(h, "trampoline_func") && buflen(&pm->sigs) >= 1) {
-      sig_t *ps;
+      msig_t *ps;
       sym_t letters;
       /* the alias went on the back when there is one, so the function itself
        * is before it; a module's own function gets no alias and is last */
-      ps = (sig_t *)bufref(&pm->sigs,
+      ps = (msig_t *)bufref(&pm->sigs,
                             buflen(&pm->sigs) - 1 - ((g_iface != 0) ? 1 : 0));
       if (ps->res != VT_PTR && ps->res != VT_I64)
         sneprintf(pn, "a trampoline_func returns ptr or i64, not %s", vtname(ps->res));
@@ -3129,7 +3129,7 @@ static void u_form(unst_t *pu, snode_t *pn)
     case IK_CALL_INDIRECT: case IK_RETURN_CALL_INDIRECT: {
       bool indirect, tail;
       size_t nargs, have, k;
-      sig_t *ps;
+      msig_t *ps;
       vt_t res;
       sym_t tjump_letters;
       indirect = (pin->kind == IK_CALL_INDIRECT || pin->kind == IK_RETURN_CALL_INDIRECT);
@@ -3358,7 +3358,7 @@ static vt_t lw_type_of(lwr_t *pl, snode_t *pn)
     return lw_type_of(pl, snref(pn, snlen(pn) - 1));
   }
   if (streql(h, "call") || streql(h, "return_call")) {
-    sig_t *ps;
+    msig_t *ps;
     if (snlen(pn) < 2 || snref(pn, 1)->nt != SN_SYM) return VT_I32;
     ps = mod_sig(pl->mod, snref(pn, 1)->sym);
     return (ps != NULL) ? ps->res : VT_I32;
@@ -3369,7 +3369,7 @@ static vt_t lw_type_of(lwr_t *pl, snode_t *pn)
 }
 
 /* a call whose callee takes a trailing $ap$: build the slot array first */
-static void lw_vacall(lwr_t *pl, snode_t *src, snode_t *dst, sig_t *ps)
+static void lw_vacall(lwr_t *pl, snode_t *src, snode_t *dst, msig_t *ps)
 {
   size_t fixed, nargs, nva, k;
   snode_t *pseq;
@@ -3562,7 +3562,7 @@ static void lw_form(lwr_t *pl, snode_t *src, snode_t *dst)
   }
 
   if (streql(h, "call") || streql(h, "return_call")) {
-    sig_t *ps;
+    msig_t *ps;
     if (snlen(src) > 1 && snref(src, 1)->nt == SN_SYM) {
       ps = mod_sig(pl->mod, snref(src, 1)->sym);
       if (ps != NULL && ps->variadic) { lw_vacall(pl, src, dst, ps); return; }
@@ -3586,8 +3586,8 @@ static void use_spread(mod_t *pm, sym_t woname, int no)
   size_t i;
   if (woname == 0) return;
   for (i = 0; i < buflen(&pm->sigs); ++i) {
-    sig_t *p;
-    p = (sig_t *)bufref(&pm->sigs, i);
+    msig_t *p;
+    p = (msig_t *)bufref(&pm->sigs, i);
     if (p->woname == woname && p->useno == 0) { p->used = true; p->useno = no; }
   }
   for (i = 0; i < buflen(&pm->globals); ++i) {
@@ -3611,7 +3611,7 @@ void mod_scan_uses(mod_t *pm, snode_t *pn)
   if (snref(pn, 0)->nt == SN_SYM && snlen(pn) > 1 && snref(pn, 1)->nt == SN_SYM) {
     h = symname(snref(pn, 0)->sym);
     if (streql(h, "call") || streql(h, "return_call")) {
-      sig_t *ps;
+      msig_t *ps;
       ps = mod_sig(pm, snref(pn, 1)->sym);
       if (ps != NULL && !ps->used) { ps->used = true; ps->useno = ++g_useno; use_spread(pm, ps->woname, ps->useno); }
     } else if (streql(h, "global.get") || streql(h, "global.set")) {
@@ -3624,7 +3624,7 @@ void mod_scan_uses(mod_t *pm, snode_t *pn)
         }
       }
     } else if (streql(h, "ref.func")) {
-      sig_t *ps;
+      msig_t *ps;
       ps = mod_sig(pm, snref(pn, 1)->sym);
       if (ps != NULL && !ps->used) { ps->used = true; ps->useno = ++g_useno; use_spread(pm, ps->woname, ps->useno); }
     } else if (streql(h, "ref.data")) {

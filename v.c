@@ -540,7 +540,7 @@ static void cc_opnd(const opnd_t *po, const char *mod, FILE *fp)
       fputs(")", fp);
       break;
     case OK_FUNC: {
-      sig_t *ps;                        /* a reference names its owner's symbol */
+      msig_t *ps;                        /* a reference names its owner's symbol */
       ps = (g_cc_mod != NULL) ? mod_sig(g_cc_mod, po->sym) : NULL;
       if (ps != NULL && ps->cname != 0) {
         fprintf(fp, "(marv_ptr)%s", symname(ps->cname));
@@ -609,13 +609,13 @@ static const char *cc_memtype(const char *op)
  * interface meets a static definition and the C compiler refuses both. */
 static bool cc_iface_visible(const mod_t *pm, const fn_t *pf)
 {
-  sig_t *pl;
+  msig_t *pl;
   size_t i;
   pl = mod_sig((mod_t *)pm, pf->name);
   if (pl == NULL || pl->cname == 0) return false;
   for (i = 0; i < buflen(&((mod_t *)pm)->sigs); ++i) {
-    sig_t *ps;
-    ps = (sig_t *)bufref(&((mod_t *)pm)->sigs, i);
+    msig_t *ps;
+    ps = (msig_t *)bufref(&((mod_t *)pm)->sigs, i);
     if (ps->cname == pl->cname && !ps->local) return true;
   }
   return false;
@@ -1044,9 +1044,9 @@ void cc_decls_write(const mod_t *pm, FILE *fp)
   buf_t seen;
   bufinit(&seen, sizeof(sym_t));
   for (i = 0; i < buflen(&((mod_t *)pm)->sigs); ++i) {
-    sig_t *ps;
+    msig_t *ps;
     bool dup;
-    ps = (sig_t *)bufref(&((mod_t *)pm)->sigs, i);
+    ps = (msig_t *)bufref(&((mod_t *)pm)->sigs, i);
     if (ps->cname == 0) continue;
     dup = false;
     for (k = 0; k < buflen(&seen); ++k)
@@ -1108,7 +1108,7 @@ static void cc_relname(const mod_t *pm, drel_t *pr, const char *mod, FILE *fp)
 {
   cbuf_t nb;
   if (pr->isfunc) {
-    sig_t *ps;
+    msig_t *ps;
     ps = mod_sig((mod_t *)pm, pr->sym);
     if (ps != NULL && ps->cname != 0) { fputs(symname(ps->cname), fp); return; }
   } else {
@@ -1630,7 +1630,7 @@ static void wo_form(snode_t *pn, int ind, FILE *fp)
       wo_ind(ind, fp);
       fprintf(fp, "%s ", (pin->kind == IK_REF_DATA) ? "ref.data" : "ref.func");
       if (pin->kind == IK_REF_FUNC) {     /* its owner's symbol, not ours */
-        sig_t *ps;
+        msig_t *ps;
         ps = mod_sig(g_wo_mod, snref(pn, 1)->sym);
         if (ps != NULL && ps->woname != 0) fputs(symname(ps->woname), fp);
         else wo_qname(g_wo_mod, snref(pn, 1)->sym, fp);
@@ -1728,7 +1728,7 @@ static void wo_form(snode_t *pn, int ind, FILE *fp)
       return;
     }
     case IK_CALL: case IK_RETURN_CALL: {
-      sig_t *ps;
+      msig_t *ps;
       for (i = 2; i < snlen(pn); ++i) wo_form(snref(pn, i), ind, fp);
       ps = mod_sig(g_wo_mod, snref(pn, 1)->sym);
       if (streql(h, "return_call")) wo_unframe(ind, fp);
@@ -1912,10 +1912,10 @@ void wo_prologue(mod_t *pm, FILE *fp)
   bufinit(&seen, sizeof(sym_t));
   for (want = 1; want <= mod_usemax(); ++want) {
   for (i = 0; i < buflen(&pm->sigs); ++i) {
-    sig_t *ps;
+    msig_t *ps;
     bool dup;
     const char *w; const char *colon;
-    ps = (sig_t *)bufref(&pm->sigs, i);
+    ps = (msig_t *)bufref(&pm->sigs, i);
     if (ps->local || ps->woname == 0 || ps->useno != want) continue;
     if (wo_is_ours(pm, ps->woname)) continue;
     dup = false;
@@ -1984,7 +1984,7 @@ void wo_epilogue(FILE *fp)
 static void wo_relname(mod_t *pm, drel_t *pr, FILE *fp)
 {
   if (pr->isfunc) {
-    sig_t *ps;
+    msig_t *ps;
     ps = mod_sig(pm, pr->sym);
     if (ps != NULL && ps->woname != 0) { fputs(symname(ps->woname), fp); return; }
   } else {
@@ -2707,7 +2707,7 @@ static const char *rv_opnd(opnd_t *po, const char *scratch, FILE *fp)
       return scratch;
     }
     case OK_FUNC: {
-      sig_t *ps;
+      msig_t *ps;
       ps = mod_sig(g_rv_mod, po->sym);
       fprintf(fp, "  la %s, %s\n", scratch,
               (ps != NULL && ps->cname != 0) ? symname(ps->cname) : symname(po->sym));
@@ -3311,7 +3311,7 @@ static void rv_ins(ir_t *pi, FILE *fp)
       return;
     }
     case IR_CALL: case IR_CALLI: {
-      sig_t *ps;
+      msig_t *ps;
       rv_args(pi, 0, buflen(&pi->args) - ((pi->op == IR_CALLI) ? 1 : 0), fp);
       if (pi->op == IR_CALLI) {
         opnd_t *pt;
@@ -3332,7 +3332,7 @@ static void rv_ins(ir_t *pi, FILE *fp)
       return;
     }
     case IR_TJUMP: case IR_TJUMPI: case IR_RETCALL: case IR_RETCALLI: {
-      sig_t *ps;
+      msig_t *ps;
       bool ind;
       ind = (pi->op == IR_RETCALLI || pi->op == IR_TJUMPI);
       rv_args(pi, 0, buflen(&pi->args) - (ind ? 1 : 0), fp);
@@ -3400,7 +3400,7 @@ static int rv_p2(long long align)
 static void rv_relname(mod_t *pm, drel_t *pr, FILE *fp)
 {
   if (pr->isfunc) {
-    sig_t *ps;
+    msig_t *ps;
     ps = mod_sig(pm, pr->sym);
     fputs((ps != NULL && ps->cname != 0) ? symname(ps->cname)
                                          : symname(pr->sym), fp);
@@ -3701,7 +3701,7 @@ void rv_func(mod_t *pm, fn_t *pf, FILE *fp)
   g_rv_total = (g_rv_savebase + nsaved * 8 + 15) / 16 * 16;
 
   {
-    sig_t *ps;
+    msig_t *ps;
     ps = mod_sig(pm, pf->name);
     qsym = (ps != NULL && ps->cname != 0) ? ps->cname : pf->name;
     if (pf->expname != 0) {
@@ -3838,7 +3838,7 @@ void cc_tramp_func(const mod_t *pm, fn_t *pf, FILE *fp)
   sym_t realexp;
   sym_t bodyname;
   sym_t letters;
-  sig_t *ps;
+  msig_t *ps;
   size_t i;
   int off;
   cbuf_t mn;

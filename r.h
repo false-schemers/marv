@@ -190,7 +190,7 @@ typedef struct fn {
 typedef struct var { sym_t name; vt_t vt; } var_t;
 
 /* what the module and its interfaces declare */
-typedef struct sig {
+typedef struct msig {
   sym_t name;
   sym_t cname;        /* <module>_<name>, or <interface>_<name> */
   sym_t woname;       /* $<module>:<name> for the wo target */
@@ -201,7 +201,7 @@ typedef struct sig {
   int useno;          /* and in which order it was first referred to */
   vt_t res;
   buf_t ptypes;
-} sig_t;
+} msig_t;
 
 /* a record and its fields, laid out as the Scheme implementation lays them:
  * each field at its own alignment, the whole rounded up to the widest */
@@ -230,7 +230,7 @@ typedef struct mac {
 
 typedef struct mod {
   sym_t name;
-  buf_t sigs;         /* sig_t: functions, from this module and its interfaces */
+  buf_t sigs;         /* msig_t: functions, from this module and its interfaces */
   buf_t globals;      /* glb_t */
   buf_t consts;       /* cst_t */
   buf_t records;      /* rec_t */
@@ -303,7 +303,7 @@ typedef struct cst {
   snode_t val;        /* when it is an expression rather than a number */
 } cst_t;
 
-extern sig_t *mod_sig(mod_t *pm, sym_t name);
+extern msig_t *mod_sig(mod_t *pm, sym_t name);
 extern sym_t mod_dataname(mod_t *pm, sym_t name);
 extern sym_t mod_datawoname(mod_t *pm, sym_t name);
 extern sym_t mod_globalname(mod_t *pm, sym_t name);
@@ -321,7 +321,7 @@ extern void mod_reset_fresh(void);
 /* The letters a chain's signature is named by: one per type, result
  * first.  (param i64 i64 ptr) (result ptr) is "pllp", and the area a
  * trampoline_jump of that shape writes is $tc$pllp. */
-extern sym_t sig_letters(sig_t *ps);
+extern sym_t sig_letters(msig_t *ps);
 extern sym_t tramp_area_name(sym_t letters);
 /* how many argument slots an area of this shape holds */
 extern int sig_nparams(mod_t *pm, sym_t letters);
