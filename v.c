@@ -1000,7 +1000,9 @@ static void deps_line(tt_t t, FILE *fp)
   size_t d;
   if (sys_count() == 0) return;
   fprintf(fp, "%smarv-sys-deps:", tt_comment(t));
-  for (d = 0; d < sys_count(); ++d) fprintf(fp, " %s", sys_name(d));
+  /* the relative name, not the module name: a link reading this back has to
+   * resolve it again on its own -L path */
+  for (d = 0; d < sys_count(); ++d) fprintf(fp, " %s", sys_rel(d));
   if (t == TT_CC) fputs(" */", fp);
   fputs("\n", fp);
 }

@@ -176,3 +176,28 @@ marv -T target -t wcpl -o app.wasm \
 1. **Target Description Directories (`-T`)** — Defaults to `("target/" "<PREFIX>/target")` when the compiler is built with `-D PREFIX=...` (e.g. `/usr/local/share/marv/` via `Makefile`), or `("target/" "targets/")` if `-D PREFIX` was not given. Searched when resolving `-t TARGDES` to `<dir>/<TARGDES>.mvt` (after checking `<TARGDES>.mvt` directly).
 2. **System Header & Adapter Directories (`-L`)** — Defaults to `("lib/" "<PREFIX>/lib")` when the compiler is built with `-D PREFIX=...`, or `("lib/" "libs/")` if `-D PREFIX` was not given. Searched when resolving `(include system $foo.bar)` to `<dir>/foo.bar.mvh` and its companion adapter `<dir>/foo.bar.c`.
 3. **Local Header Directories (`-I`, default `("./")`)** — Searched (after the directory of the including file) when resolving `(include $foo.bar)` to `<dir>/foo.bar.mvh`.
+
+An include form may name several symbols, and then all but the last are
+directories the last one sits in: `(include system $impl $fast $greet)`
+resolves to `<dir>/impl/fast/greet.mvh` and its adapter
+`<dir>/impl/fast/greet.c`, and names the module `$greet`. One form still names
+one interface, and an empty form is an error.
+
+Dots also stand for directories, and a dotted name is tried both as written
+and with its dots turned into slashes — but a dot stays part of the module
+where a separated symbol does not:
+
+| form | module | files it can reach |
+| --- | --- | --- |
+| `(include $foo $bar $baz)` | `$baz` | `foo/bar/baz.mvh` |
+| `(include $foo $bar.baz)` | `$bar.baz` | `foo/bar.baz.mvh`, then `foo/bar/baz.mvh` |
+
+The two can therefore land on the same file and still name different modules,
+and only the dotted form can be answered by a file called `bar.baz.mvh`.
+
+The prefix only chooses which file is read, which is what lets two directories
+hold two implementations of one module without the code that uses it changing.
+The name a `-c` object records in its `marv-sys-deps` line is the whole
+relative name rather than the module, since a later link resolves it again on
+its own `-L` path and the module alone would find whichever implementation
+came first.

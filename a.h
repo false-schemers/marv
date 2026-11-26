@@ -22,5 +22,5 @@ extern int delfile(const char *path);
 /* peak memory, where the host can tell us */
 extern void report_peak(void);
 
-/* sys_count and sys_name, which an emitter writes onto an object's first
+/* sys_count and sys_rel, which an emitter writes onto an object's first
  * line, are declared in r.h with the rest of the lookup machinery. */

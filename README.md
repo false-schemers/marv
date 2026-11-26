@@ -77,6 +77,26 @@ Control flow follows WebAssembly's structured control constructs:
 
 Every MARV source file (`.mvs`) can include system headers (`(include system $stdio)`) and project headers (`(include $vec3)`) before its `(module $name ...)` definition.
 
+A form may name several symbols, and then all but the last are directories the last one sits in: `(include system $impl $fast $greet)` reads `impl/fast/greet.mvh`, and the module is `$greet`. One form names one interface either way, so several interfaces still take several forms, and an empty form is an error.
+
+A separated name and a dotted one are not the same thing. Dots also stand for directories, but they stay part of the module, while the symbols in front of the last one do not:
+
+| form | module | files it can reach |
+| --- | --- | --- |
+| `(include $foo $bar $baz)` | `$baz` | `foo/bar/baz.mvh` |
+| `(include $foo $bar.baz)` | `$bar.baz` | `foo/bar.baz.mvh`, then `foo/bar/baz.mvh` |
+
+So the two can land on the same file and still name different modules, and only the dotted one can be answered by a file called `bar.baz.mvh`.
+
+The prefix therefore chooses which file is read and nothing else, which is what lets two directories hold two implementations of one module without the code using it changing:
+
+```scheme
+(include system $impl $fast $greet)   ;; or $slow; the module is $greet either way
+(module $prog
+  (func $main (export "main") (result i32)
+    (return (call $which))))
+```
+
 Interface headers (`.mvh`) declare constants, records, functions, globals, and data segments using MARV's unified calling convention:
 
 - **Compile-time constants:**

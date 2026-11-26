@@ -354,7 +354,8 @@ extern bool adapter_of(const char *mvh, cbuf_t *pcb);
 /* what the compile just done pulled in */
 extern void sys_reset(void);
 extern size_t sys_count(void);
-extern const char *sys_name(size_t i);
+extern const char *sys_name(size_t i);   /* the module: the last segment */
+extern const char *sys_rel(size_t i);    /* the whole relative name */
 extern const char *sys_path(size_t i);
 /* scan a module member for what later members may refer to */
 extern void mod_declare(mod_t *pm, snode_t *pn);
