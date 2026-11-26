@@ -79,14 +79,14 @@ Every MARV source file (`.mvs`) can include system headers (`(include system $st
 
 A form may name several symbols, and then all but the last are directories the last one sits in: `(include system $impl $fast $greet)` reads `impl/fast/greet.mvh`, and the module is `$greet`. One form names one interface either way, so several interfaces still take several forms, and an empty form is an error.
 
-A separated name and a dotted one are not the same thing. Dots also stand for directories, but they stay part of the module, while the symbols in front of the last one do not:
+A separated name and a dotted one are not the same thing. A directory comes from a symbol of its own; a dot is simply part of a name:
 
-| form | module | files it can reach |
+| form | module | file |
 | --- | --- | --- |
 | `(include $foo $bar $baz)` | `$baz` | `foo/bar/baz.mvh` |
-| `(include $foo $bar.baz)` | `$bar.baz` | `foo/bar.baz.mvh`, then `foo/bar/baz.mvh` |
+| `(include $foo $bar.baz)` | `$bar.baz` | `foo/bar.baz.mvh` |
 
-So the two can land on the same file and still name different modules, and only the dotted one can be answered by a file called `bar.baz.mvh`.
+Each form names one file, with no second place to look.
 
 The prefix therefore chooses which file is read and nothing else, which is what lets two directories hold two implementations of one module without the code using it changing:
 

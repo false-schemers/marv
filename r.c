@@ -2020,32 +2020,28 @@ void path_dir(const char *path, cbuf_t *pcb)
   cbput(path, n, pcb);
 }
 
-/* A dotted name is tried as written and with its dots turned into
- * separators, so $sys.stat finds sys.stat.mvh or sys/stat.mvh. [cco] */
+/* A name names one file: the directories it may sit in are the ones an
+ * include wrote in front of it, and the dots in it are its own.  A dotted
+ * name used to be tried a second time with its dots as separators, so that
+ * $sys.stat could be answered by sys/stat.mvh; nothing was ever laid out
+ * that way, and an include that wants a directory says so now.  [cco] */
 bool find_in_dirs(buf_t *pb, const char *first, const char *name,
                          const char *ext, cbuf_t *pcb)
 {
-  size_t d, k, n;
-  bool dotted;
+  size_t d, n;
   if (name[0] == '$') name += 1;
-  dotted = false;
-  for (k = 0; name[k] != '\0'; ++k) if (name[k] == '.') dotted = true;
   n = (first != NULL) ? buflen(pb) + 1 : buflen(pb);
   for (d = 0; d < n; ++d) {
     const char *dir;
-    size_t pass;
     if (first != NULL) dir = (d == 0) ? first : symname(*(sym_t *)bufref(pb, d - 1));
     else dir = symname(*(sym_t *)bufref(pb, d));
     if (dir == NULL) continue;
-    for (pass = 0; pass < (dotted ? 2u : 1u); ++pass) {
-      cbclear(pcb);
-      cbputs(dir, pcb);
-      for (k = 0; name[k] != '\0'; ++k)
-        cbputc((pass == 1 && name[k] == '.') ? '/' : name[k], pcb);
-      cbputs(ext, pcb);
-      cbputc(0, pcb);
-      if (file_readable((const char *)cbdata(pcb))) return true;
-    }
+    cbclear(pcb);
+    cbputs(dir, pcb);
+    cbputs(name, pcb);
+    cbputs(ext, pcb);
+    cbputc(0, pcb);
+    if (file_readable((const char *)cbdata(pcb))) return true;
   }
   return false;
 }
@@ -2097,23 +2093,16 @@ static void sys_note(sym_t path, sym_t rel)
   *(sym_t *)bufnewbk(&g_sysrel) = rel;
 }
 
-/* A system .mvh is paired with the .c adapter beside it, by its own name
- * first and then by the slashed spelling of a dotted one. */
+/* A system .mvh is paired with the .c adapter beside it, under the same
+ * name.  This too used to try a dotted name again with its dots as
+ * separators; see find_in_dirs. */
 bool adapter_of(const char *mvh, cbuf_t *pcb)
 {
-  size_t n, k, base;
+  size_t n;
   n = strlen(mvh);
   if (n < 4) return false;
   cbclear(pcb);
   cbput(mvh, n - 4, pcb);
-  cbputs(".c", pcb);
-  cbputc(0, pcb);
-  if (file_readable((const char *)cbdata(pcb))) return true;
-  base = n - 4;
-  while (base > 0 && mvh[base - 1] != '/' && mvh[base - 1] != '\\') base -= 1;
-  cbclear(pcb);
-  cbput(mvh, base, pcb);
-  for (k = base; k < n - 4; ++k) cbputc((mvh[k] == '.') ? '/' : mvh[k], pcb);
   cbputs(".c", pcb);
   cbputc(0, pcb);
   return file_readable((const char *)cbdata(pcb));

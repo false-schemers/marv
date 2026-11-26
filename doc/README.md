@@ -84,7 +84,8 @@ A `.mvs` file consists of zero or more `(include ...)` directives followed by a 
 )
 ```
 
-- `(include system $<mod>)` searches the system header directories (`-L`, default `("lib/" "<PREFIX>/lib")` when compiled with `-D PREFIX=...`, or `("lib/" "libs/")` otherwise) for `<mod>.mvh` (or `<slashed>.mvh` for dotted names) and records `<mod>` as a system adapter dependency if any symbol from `<mod>` is referenced by the module.
+- `(include system $<mod>)` searches the system header directories (`-L`, default `("lib/" "<PREFIX>/lib")` when compiled with `-D PREFIX=...`, or `("lib/" "libs/")` otherwise) for `<mod>.mvh`, and records `<mod>` as a system adapter dependency if any symbol from `<mod>` is referenced by the module. A dotted name is looked up as written: dots belong to the name, and a directory is named by a symbol of its own.
+- `(include system $<dir> ... $<mod>)` names the same module `$<mod>` in a subdirectory: every symbol but the last is a directory, so `(include system $impl $fast $greet)` reads `impl/fast/greet.mvh` and pairs it with `impl/fast/greet.c`. The prefix picks the file and nothing else, which is how two directories can hold two implementations of one module without the code that uses it changing. An include naming no module is an error.
 - `(include $<hdr>)` searches the directory of the current file first, followed by local include directories (`-I`, default `("./")`).
 - Cyclic or duplicate `include` directives are automatically ignored.
 

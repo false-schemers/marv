@@ -183,17 +183,18 @@ resolves to `<dir>/impl/fast/greet.mvh` and its adapter
 `<dir>/impl/fast/greet.c`, and names the module `$greet`. One form still names
 one interface, and an empty form is an error.
 
-Dots also stand for directories, and a dotted name is tried both as written
-and with its dots turned into slashes — but a dot stays part of the module
-where a separated symbol does not:
+A directory comes from a symbol of its own; a dot is simply part of a name,
+and a dotted name is looked up as written:
 
-| form | module | files it can reach |
+| form | module | file |
 | --- | --- | --- |
 | `(include $foo $bar $baz)` | `$baz` | `foo/bar/baz.mvh` |
-| `(include $foo $bar.baz)` | `$bar.baz` | `foo/bar.baz.mvh`, then `foo/bar/baz.mvh` |
+| `(include $foo $bar.baz)` | `$bar.baz` | `foo/bar.baz.mvh` |
 
-The two can therefore land on the same file and still name different modules,
-and only the dotted form can be answered by a file called `bar.baz.mvh`.
+Each form names one file, with no second place to look. A dotted name used to
+be tried again with its dots as separators, so that `$sys.stat` could be
+answered by `sys/stat.mvh`; nothing was laid out that way, and an include
+that wants a directory now says so.
 
 The prefix only chooses which file is read, which is what lets two directories
 hold two implementations of one module without the code that uses it changing.
