@@ -20,6 +20,7 @@ marv [-t TARGDES] [-c] [OPTION]... FILE...
 | `-c` | `--compile` | *(none)* | Compile one `.mvs` file into a target object file without linking. |
 | `-o` | `--output=FILE` | `FILE` | Output pathname (optional override in `-c` mode; required executable name when `-c` is omitted). |
 | `-O` | `--optimize=LEVEL` | `0`, `1`, `2`, or `3` | Override optimization placeholders in the target compiler command (for example, `-O2`, `-O 2` or `--optimize=2`). A `cl` target saturates at 2, because MSVC has no `/O3` and answers an unknown `/O` letter with a warning and its default. |
+| `-D` | `--define=NDEBUG` | `NDEBUG` | Pass `-DNDEBUG` on to the backend, where a target's `~D` placeholder says it goes. `NDEBUG` is the only name accepted: MARV preprocesses nothing itself, and this is the one define every target type understands. |
 | `-L` | `--system-dir=DIR` | `DIR` | Add `DIR` to the system `.mvh` header and `.c` adapter lookup path (default: `("lib/" "<PREFIX>/lib")` or `("lib/" "libs/")`). |
 | `-I` | `--include-dir=DIR` | `DIR` | Add `DIR` to the project/local `.mvh` header lookup path (default: `("./")`). |
 | `-v` | `--verbose` | *(none)* | Print each compilation step line and the linker command line to `stderr` before executing. |
@@ -129,6 +130,18 @@ support `-O0` or `-O3`; it may warn and ignore those flags, or reject them with
 [Microsoft's optimization options](https://learn.microsoft.com/en-us/cpp/build/reference/o-options-optimize-code?view=msvc-170).
 In `-c` mode no backend compiler is invoked, so `-O` has no effect on the
 emitted target file.
+
+`-D NDEBUG` works the same way, through a `~D` placeholder. Where `~O` carries
+a digit of its own, `~D` carries nothing: it becomes the whole of `-DNDEBUG`,
+written as one word so that nothing downstream has to split it, and becomes
+nothing at all when `-D` was not given, taking one following space with it so
+that the command reads as though the placeholder had never been there. A
+target therefore writes `~D` wherever a define belongs. Every bundled target
+has one; as with `-O`, a target
+without the placeholder ignores `-D`, and `-c` mode invokes no backend so the
+option has no effect on the emitted file. MARV does not read `NDEBUG` itself:
+all three target types understand it, and passing it on is the whole of the
+feature.
 
 ### Paths passed to the target command
 

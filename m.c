@@ -1747,7 +1747,9 @@ static void set_elongopt(const char *lopt, size_t n)
 {
   if (n + 3 > sizeof(g_elongbuf)) n = sizeof(g_elongbuf) - 3;
   g_elongbuf[0] = g_elongbuf[1] = (char)45;   /* a hyphen, twice */
-  memcpy(g_elongbuf + 2, lopt, n);
+  /* &a[i] rather than a+i: wcpl does not convert an array to a pointer to
+   * its first element on its own, and marv is one of its targets */
+  memcpy(&g_elongbuf[2], lopt, n);
   g_elongbuf[n + 2] = 0;
   elongopt = g_elongbuf;
 }

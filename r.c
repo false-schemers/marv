@@ -820,6 +820,43 @@ vt_t vt_of_sym(sym_t s)
   return VT_VOID;
 }
 
+/* The head of a (block|loop [$label] [(result t)] ...) form: the label, 0
+ * when there is none; the type it leaves on the stack, VT_VOID when it
+ * leaves nothing; and the index its body starts at.  Both the
+ * unstructuring pass and the WebAssembly emitter read this shape, so it is
+ * read in one place.
+ *
+ * A loop is required to carry a label.  Nothing could branch back to one
+ * without it, so a loop that has none is a mistake in whatever wrote the
+ * module; complaining here names the form, where a complaint from a later
+ * tool would name a line of generated output instead.  A block may go
+ * without, since it is left by falling out of it. */
+void ctrl_head(snode_t *pn, bool isloop, sym_t *plabel, vt_t *prt, size_t *pfirst)
+{
+  size_t first;
+  sym_t label;
+  vt_t rt;
+  first = 1;
+  label = 0;
+  rt = VT_VOID;
+  if (first < snlen(pn) && snref(pn, first)->nt == SN_SYM) {
+    label = snref(pn, first)->sym;
+    first += 1;
+  } else if (isloop) {
+    sneprintf(pn, "loop needs a label: nothing can branch back to it");
+  }
+  if (first < snlen(pn) && snref(pn, first)->nt == SN_LIST
+      && snlen(snref(pn, first)) == 2
+      && snref(snref(pn, first), 0)->nt == SN_SYM
+      && streql(symname(snref(snref(pn, first), 0)->sym), "result")) {
+    rt = vt_of_sym(snref(snref(pn, first), 1)->sym);
+    if (rt == VT_VOID)
+      sneprintf(pn, "unknown result type in %s", isloop ? "loop" : "block");
+    first += 1;
+  }
+  *plabel = label; *prt = rt; *pfirst = first;
+}
+
 /* ================================================================ */
 /* What a module and its interfaces declare. */
 
@@ -2565,20 +2602,13 @@ static void u_block(unst_t *pu, snode_t *pn)
   opnd_t res;
   bool isloop;
   sym_t startl;
+  sym_t label;
   const char *h;
 
   h = symname(snref(pn, 0)->sym);
   isloop = streql(h, "loop");
-  first = 1;
-  rt = VT_VOID;
   memset(&res, 0, sizeof(opnd_t));
-  if (first < snlen(pn) && snref(pn, first)->nt == SN_SYM) first += 1;   /* $label */
-  if (first < snlen(pn) && snref(pn, first)->nt == SN_LIST
-      && snlen(snref(pn, first)) == 2
-      && streql(symname(snref(snref(pn, first), 0)->sym), "result")) {
-    rt = vt_of_sym(snref(snref(pn, first), 1)->sym);
-    first += 1;
-  }
+  ctrl_head(pn, isloop, &label, &rt, &first);
   if (isloop) u_materialize(pu);
   if (rt != VT_VOID) u_temp(pu, rt, &res);
 
@@ -2586,7 +2616,7 @@ static void u_block(unst_t *pu, snode_t *pn)
   endl = isloop ? u_label(pu, "loop_end") : startl;
   pc = (ctrl_t *)bufnewbk(&pu->ctrl);
   memset(pc, 0, sizeof(ctrl_t));
-  pc->label = (snlen(pn) > 1 && snref(pn, 1)->nt == SN_SYM) ? snref(pn, 1)->sym : 0;
+  pc->label = label;
   pc->isloop = isloop;
   pc->target = isloop ? startl : endl;
   pc->hasres = (rt != VT_VOID);

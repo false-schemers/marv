@@ -104,6 +104,8 @@ typedef enum vt {
 
 extern const char *vtname(vt_t vt);
 extern vt_t vt_of_sym(sym_t s);
+/* the label, result type and body start of a (block|loop ...) form */
+extern void ctrl_head(snode_t *pn, bool isloop, sym_t *plabel, vt_t *prt, size_t *pfirst);
 
 /* instruction kinds, in the order the table uses them */
 typedef enum ik {

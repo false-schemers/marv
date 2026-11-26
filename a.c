@@ -217,9 +217,17 @@ static int g_optlevel = -1;
  * highest level the compiler has.  Three saturates to two. */
 static bool g_opt_cl = false;
 
-/* Copy one template item, replacing ~O0 through ~O3 with a compiler option.
- * The level is the one -O asked for, or the template's own digit when -O was
- * not given; either way a cl target saturates at 2. */
+/* -D NDEBUG: every target type takes it, so marv passes it on rather than
+ * acting on it.  A template says where it goes with ~D. */
+static bool g_ndebug = false;
+
+/* Copy one template item, replacing ~O0 through ~O3 with a compiler option
+ * and ~D with what -D asked for.  The level is the one -O asked for, or the
+ * template's own digit when -O was not given; either way a cl target
+ * saturates at 2.  ~D is the whole of -DNDEBUG, written as one word so that
+ * nothing has to split it again, and nothing at all when -D was not given --
+ * taking one following space with it, so that a command built without the
+ * option reads as though the placeholder had never been there. */
 static size_t put_opt_template(cbuf_t *out, const char *s)
 {
   if (s[0] == '~' && s[1] == 'O' && s[2] >= '0' && s[2] <= '3') {
@@ -230,6 +238,10 @@ static size_t put_opt_template(cbuf_t *out, const char *s)
     cbputc('O', out);
     cbputc((char)('0' + lvl), out);
     return 3;
+  }
+  if (s[0] == '~' && s[1] == 'D') {
+    if (g_ndebug) { cbputs("-DNDEBUG", out); return 2; }
+    return (s[2] == ' ') ? 3 : 2;   /* the space before the next word too */
   }
   cbputc(*s, out);
   return 1;
@@ -265,6 +277,9 @@ static void tgt_clause(tgt_t *pt, snode_t *pc, cbuf_t *pfl)
     if (pl->nt != SN_LIST) return;
     for (i = 0; i < snlen(pl); ++i) {
       if (snref(pl, i)->nt != SN_STR) continue;
+      /* a flag that would expand to nothing takes no separator either */
+      if (!g_ndebug && streql(k, "cflags")
+          && streql((const char *)cbdata(&snref(pl, i)->data), "~D")) continue;
       if (cblen(pfl) > 0) cbputc(' ', pfl);
       if (streql(k, "cflags")) {
         const char *s;
@@ -1548,6 +1563,16 @@ static void set_optlevel(const char *what, const char *val)
   g_optlevel = val[0] - '0';
 }
 
+/* -D NAME and --define=NAME.  Only NDEBUG: marv does not preprocess
+ * anything itself, it just puts the define where a target's ~D says, and
+ * NDEBUG is the one every target type understands. */
+static void set_define(const char *what, const char *val)
+{
+  if (!streql(val, "NDEBUG"))
+    eusage("%s takes NDEBUG, not %s", what, val);
+  g_ndebug = true;
+}
+
 /* -K N and --split-funcs=N */
 static void set_split(const char *what, const char *val)
 {
@@ -1586,6 +1611,7 @@ int main(int argc, char **argv)
      "  -O, --optimize=LEVEL   Override the target level (0..3; cl stops at 2)\n"
      "  -L, --system-dir=DIR   Add DIR to the system .mvh and .c lookup path\n"
      "  -I, --include-dir=DIR  Add DIR to the local .mvh lookup path\n"
+     "  -D, --define=NDEBUG    Pass -DNDEBUG on to the target (only NDEBUG)\n"
      "  -K, --split-funcs=N    In link mode on a cc target, cut the generated C\n"
      "                         into pieces of at most N functions (default 300,\n"
      "                         or 0 with -O3 unless the target is cl; 0 does not cut)\n"
@@ -1613,7 +1639,7 @@ int main(int argc, char **argv)
    * option-with-argument named -, which is what the trailing -: in the
    * spec below declares, so --target=cc arrives as eoptarg "target=cc".
    * [cco] */
-  while ((opt = egetopt(argc, argv, "cvnhK:t:T:o:L:I:O:M:-:")) != EOF) {
+  while ((opt = egetopt(argc, argv, "cvnhK:t:T:o:L:I:O:M:D:-:")) != EOF) {
     switch (opt) {
       case 'c': conly = true; break;
       case 'v': g_verbose = 1; break;
@@ -1627,6 +1653,7 @@ int main(int argc, char **argv)
       case 'I': dirs_add(&g_idirs, eoptarg); break;
       case 'O': set_optlevel("-O", eoptarg); break;
       case 'K': set_split("-K", eoptarg); break;
+      case 'D': set_define("-D", eoptarg); break;
       case '-': {
         /* long_opt takes the name, with a trailing = where a value follows,
          * and accepts both --name=VALUE and --name VALUE; the value arrives
@@ -1646,6 +1673,7 @@ int main(int argc, char **argv)
         else if (long_opt("system-dir=")) dirs_add(&g_ldirs, eoptarg);
         else if (long_opt("include-dir=")) dirs_add(&g_idirs, eoptarg);
         else if (long_opt("makefile-dir=")) make_dir = eoptarg;
+        else if (long_opt("define=")) set_define(elongopt, eoptarg);
         else if (long_opt("split-funcs=")) set_split(elongopt, eoptarg);
         else if (long_opt("optimize=")) set_optlevel(elongopt, eoptarg);
         else eusage("illegal option: --%s", eoptarg);
